@@ -2741,8 +2741,8 @@ dependencies = [
 
 [[package]]
 name = "xcsc"
-version = "1.0.1"
-source = "git+https://github.com/isarmg/xcsc.git?rev=d3e9b8db84e4ead70ec0bf8a596dbad697f7db24#d3e9b8db84e4ead70ec0bf8a596dbad697f7db24"
+version = "1.0.2"
+source = "git+https://github.com/isarmg/xcsc.git?rev=4f7db625e331a9436a5aedec2f3b874cdc1c5d6f#4f7db625e331a9436a5aedec2f3b874cdc1c5d6f"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -2772,7 +2772,7 @@ dependencies = [
 
 [[package]]
 name = "xsoc"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "anyhow",
  "chrono",
