@@ -1,4 +1,5 @@
 //! Volume counters need their own baseline: sysinfo's first delta can be the lifetime total.
+//! Retain the last observed read-only flag with the same bounded volume identity.
 use std::collections::HashMap;
 
 use crate::model::DiskSnapshot;
@@ -7,11 +8,29 @@ type Identity = (String, String, String);
 
 #[derive(Default)]
 pub(super) struct DiskRates {
-    previous: HashMap<Identity, (u64, u64)>,
+    previous: HashMap<Identity, (u64, u64, bool)>,
 }
 
 impl DiskRates {
     pub(super) fn update(&mut self, disks: &mut [DiskSnapshot], elapsed_seconds: f64) {
+        self.update_with_read_only(disks, elapsed_seconds, |disk| {
+            #[cfg(target_os = "linux")]
+            {
+                super::disk_read_only::current(std::path::Path::new(&disk.mount_point))
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                Some(disk.is_read_only)
+            }
+        });
+    }
+
+    fn update_with_read_only(
+        &mut self,
+        disks: &mut [DiskSnapshot],
+        elapsed_seconds: f64,
+        mut read_only: impl FnMut(&DiskSnapshot) -> Option<bool>,
+    ) {
         // Replace, rather than extend, so removal/reinsertion gets a fresh baseline and
         // the map stays bounded by the same collection limit as the outgoing report.
         let mut current = HashMap::with_capacity(disks.len());
@@ -31,7 +50,13 @@ impl DiskRates {
             let (read, written) = deltas.unwrap_or_default();
             disk.read_bytes_per_second = super::per_second(read, elapsed_seconds);
             disk.written_bytes_per_second = super::per_second(written, elapsed_seconds);
-            current.insert(id, counters);
+            // Linux sysinfo refreshes statvfs capacity but caches the first read-only flag.
+            // A failed probe must preserve our last successful reading, not revert to that
+            // initial flag. New volumes retain sysinfo's existing observation on failure.
+            disk.is_read_only = read_only(disk)
+                .or_else(|| self.previous.get(&id).map(|previous| previous.2))
+                .unwrap_or(disk.is_read_only);
+            current.insert(id, (counters.0, counters.1, disk.is_read_only));
         }
         self.previous = current;
     }
@@ -105,6 +130,49 @@ mod tests {
         values[0].read_bytes_total += 10_000;
         rates.update(&mut values, 10.0);
         assert_eq!(values[0].read_bytes_per_second, 0.0);
+        assert_eq!(rates.previous.len(), 1);
+    }
+
+    #[test]
+    fn read_only_changes_follow_current_mount_flags_without_resetting_io() {
+        let mut rates = DiskRates::default();
+        let mut values = [disk(100, 200)];
+        for (read, written, current, expected) in [
+            (100, 200, Some(false), false),
+            (200, 400, Some(true), true),
+            (300, 600, Some(true), true),
+            (400, 800, Some(false), false),
+        ] {
+            values[0] = disk(read, written); // sysinfo's initial flag remains false.
+            rates.update_with_read_only(&mut values, 10.0, |_| current);
+            assert_eq!(values[0].is_read_only, expected);
+            assert_eq!(
+                values[0].read_bytes_per_second,
+                if read == 100 { 0.0 } else { 10.0 }
+            );
+            assert_eq!(
+                values[0].written_bytes_per_second,
+                if read == 100 { 0.0 } else { 20.0 }
+            );
+        }
+    }
+
+    #[test]
+    fn failed_read_only_probe_keeps_last_known_value_only_for_same_volume() {
+        let mut rates = DiskRates::default();
+        let mut values = [disk(100, 200)];
+        rates.update_with_read_only(&mut values, 10.0, |_| Some(true));
+        values[0].is_read_only = false; // The stale dependency value must not win.
+        rates.update_with_read_only(&mut values, 10.0, |_| None);
+        assert!(values[0].is_read_only);
+        rates.update_with_read_only(&mut [], 10.0, |_| None);
+        values[0].is_read_only = false;
+        rates.update_with_read_only(&mut values, 10.0, |_| None);
+        assert!(!values[0].is_read_only); // Removed identity does not leak into a new disk.
+        values[0].is_read_only = true;
+        values[0].mount_point = "/other".into();
+        rates.update_with_read_only(&mut values, 10.0, |_| None);
+        assert!(values[0].is_read_only); // New identity preserves either initial bool.
         assert_eq!(rates.previous.len(), 1);
     }
 }

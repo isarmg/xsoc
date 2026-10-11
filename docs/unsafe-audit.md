@@ -11,6 +11,7 @@
 | Windows 元数据、进程、磁盘与 SMART | 读取系统原生硬件及进程属性。 | 缓冲区先定预算再分配，检查实际返回长度、对齐和句柄生命周期；普通网络和文件业务使用安全 Rust。 |
 | macOS 网络硬件及接口状态 | 公共 SystemConfiguration/CoreFoundation 与 BSD getifaddrs 无安全 Rust 标准库对应功能。 | 只读 Ethernet/IEEE80211 清单及接口标志；CF Copy 结果和 getifaddrs 分配各自 RAII 单次释放；字符串固定 UTF-8 缓冲区、枚举上限、借用不超出所属数组生命周期。原生 Mac 测试与低权限服务真实上报验证。 |
 | macOS 后台显示器清单 | launchd 账户的系统报告不暴露图形会话显示器；通过公共 IOKit 只读读取连接设备的 DisplayAttributes。 | 仅在系统报告无显示器时读取型号与厂商/产品 ID；不读取序列号。CF 属性先检查类型，借用不超出拥有的快照；IO/CF 句柄 RAII 单次释放，最多 64 个条目、固定字符串缓冲区。服务账户实机验证。 |
+| Linux 当前挂载只读标志 | `libc::statvfs` 读取当前挂载标志，补充 sysinfo 首次发现后不更新的只读字段。 | 路径由 `CString` 保证 NUL 终止；`MaybeUninit<statvfs>` 提供正确对齐的输出，仅成功后读取；中断重试，其他失败保留同一卷最后有效状态，移除后不继承。 |
 | Linux 发行版本段属性 | 打包检查必须在不运行目标程序时读取固定版本字节。`link_section` 是 Rust 要求的 `unsafe` 属性契约。 | 唯一产品段仅存不可变 NUL 终止的版本数据，不包含可执行指令、指针或用户内容。 |
 | 平台行为测试的原生调用 | 需要真实 ACL、目录联接、SCM 和 ABI 结果，而不是伪造权限。 | 夹具限制临时树、固定服务名和受控系统对象，重复检查拒绝后原始字节及 ACL。 |
 

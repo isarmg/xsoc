@@ -49,6 +49,8 @@ mod windows_gpu;
 mod windows_vendor;
 
 mod disk_rates;
+#[cfg(target_os = "linux")]
+mod disk_read_only;
 mod hardware;
 mod inventory;
 pub mod smart;
