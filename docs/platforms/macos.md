@@ -4,20 +4,20 @@
 
 ## 安装并配对
 
-先完成[安装前准备](../platform-setup.md#开始前准备)。从 [1.0.0 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.0) 下载 `xsoc-1.0.0-macos-arm64-unsigned.pkg` 与 `SHA256SUMS-Darwin-arm64`。
+先完成[安装前准备](../platform-setup.md#开始前准备)。从 [1.0.1 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.1) 下载 `xsoc-1.0.1-macos-arm64-unsigned.pkg` 与 `SHA256SUMS-Darwin-arm64`。
 
 PKG 未签名、未公证。核验来源与摘要后，按系统提供的批准流程安装。
 
 在下载目录核对 PKG 摘要，与 `SHA256SUMS-Darwin-arm64` 中同名行比较：
 
 ```sh
-shasum -a 256 xsoc-1.0.0-macos-arm64-unsigned.pkg
+shasum -a 256 xsoc-1.0.1-macos-arm64-unsigned.pkg
 ```
 
 一致后安装并设置：
 
 ```sh
-sudo installer -pkg ./xsoc-1.0.0-macos-arm64-unsigned.pkg -target /
+sudo installer -pkg ./xsoc-1.0.1-macos-arm64-unsigned.pkg -target /
 sudo /usr/local/bin/xsoc service stop
 sudo /usr/local/bin/xsoc setup --interactive
 sudo /usr/local/bin/xsoc status --check --format json
@@ -65,8 +65,8 @@ XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --target a
 mkdir -p dist
 OUTPUT_DIRECTORY="$PWD/dist/smartmontools-macos-arm64" sh packaging/macos/build-smartmontools.sh
 SMART_PAYLOAD="$PWD/dist/smartmontools-macos-arm64" \
-  BINARY="$PWD/target/aarch64-apple-darwin/release/xsoc" VERSION=1.0.0 \
-  OUTPUT="$PWD/dist/xsoc-1.0.0-macos-arm64-unsigned.pkg" sh packaging/macos/build-pkg.sh
+  BINARY="$PWD/target/aarch64-apple-darwin/release/xsoc" VERSION=1.0.1 \
+  OUTPUT="$PWD/dist/xsoc-1.0.1-macos-arm64-unsigned.pkg" sh packaging/macos/build-pkg.sh
 ```
 
 smartmontools 输出目录必须尚不存在；脚本核对上游源码摘要。PKG 未签名、未公证，不能把构建成功视为系统信任或实机验收。

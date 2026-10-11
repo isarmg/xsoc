@@ -25,7 +25,7 @@
 
 准备 [xsos 管理员](https://github.com/isarmg/xsos/blob/main/docs/instance-management.md)提供的 HTTPS 根地址和实例授权码，使用管理员终端完成安装与设置。
 
-下载入口：[1.0.0 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.0)。各平台指南列出准确的原生包和校验文件名。安装前核对摘要；已发布包的源码身份以对应 manifest 和 `version` 输出为准。
+下载入口：[1.0.1 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.1)。各平台指南列出准确的原生包和校验文件名。安装前核对摘要；已发布包的源码身份以对应 manifest 和 `version` 输出为准。
 
 ## 向导输入与完成结果
 

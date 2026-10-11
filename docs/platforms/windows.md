@@ -4,18 +4,18 @@
 
 ## 安装并配对
 
-先完成[安装前准备](../platform-setup.md#开始前准备)。从 [1.0.0 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.0) 下载 `xsoc-1.0.0-x64.msi` 与 `SHA256SUMS-Windows-AMD64`。
+先完成[安装前准备](../platform-setup.md#开始前准备)。从 [1.0.1 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.1) 下载 `xsoc-1.0.1-x64.msi` 与 `SHA256SUMS-Windows-AMD64`。
 
 在管理员 PowerShell 的下载目录中计算 SHA-256，与校验文件内同名行比较：
 
 ```powershell
-Get-FileHash .\xsoc-1.0.0-x64.msi -Algorithm SHA256
+Get-FileHash .\xsoc-1.0.1-x64.msi -Algorithm SHA256
 ```
 
 一致后安装并等待向导完成：
 
 ```powershell
-$msi = (Resolve-Path .\xsoc-1.0.0-x64.msi).Path
+$msi = (Resolve-Path .\xsoc-1.0.1-x64.msi).Path
 $install = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /norestart /l*v `"$env:TEMP\xsoc-install.log`"" -Wait -PassThru
 $install.ExitCode
 ```
@@ -71,7 +71,7 @@ MSI 允许选择本机安装目录，安装全部组件并登记系统服务；�
 $env:XSOC_BUILD_SHA = git rev-parse HEAD
 cargo build --locked --release --target x86_64-pc-windows-msvc --bin xsoc --bin xsoc-maintenance
 .\packaging\windows\fetch-smartmontools.ps1 -OutputDirectory "$env:TEMP\xsoc-smartmontools"
-.\packaging\windows\wix\build-msi.cmd 1.0.0 target\x86_64-pc-windows-msvc\release\xsoc.exe target\x86_64-pc-windows-msvc\release\xsoc-maintenance.exe "$env:TEMP\xsoc-smartmontools\payload"
+.\packaging\windows\wix\build-msi.cmd 1.0.1 target\x86_64-pc-windows-msvc\release\xsoc.exe target\x86_64-pc-windows-msvc\release\xsoc-maintenance.exe "$env:TEMP\xsoc-smartmontools\payload"
 ```
 
 MSI 输出在 `packaging/windows/wix/bin/x64/Release/` 下。打包不替代真实安装器生命周期、权限和驱动验收。
