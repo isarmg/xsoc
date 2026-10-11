@@ -503,20 +503,61 @@ function Assert-SystemOwnedPrivateFileAcl([string]$Path, [string]$ServiceSid, [b
     if ($expected.Count -ne 0) { throw 'Known fixture file is missing a required role' }
 }
 
-function Assert-RuntimeLogsAcl([string]$ServiceSid) {
-    $directory = Join-Path $stateRoot 'logs'
-    $items = @(Get-ChildItem -LiteralPath $directory -Force)
-    if ($items.Count -gt 6) { throw 'Runtime log namespace exceeds six fixed entries' }
-    $paths = @($directory)
-    foreach ($item in $items) {
+function Assert-RuntimeLogNamespace([object[]]$Items) {
+    # One active log, four archives, the writer lease and the reader gate.
+    if ($Items.Count -gt 7) { throw 'Runtime log namespace exceeds seven fixed entries' }
+    foreach ($item in $Items) {
         if ($item.PSIsContainer -or
             ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
             $item.Length -gt 8388608 -or
             ($item.Name -ne '.xsoc.jsonl.writer.lock' -and
+             $item.Name -ne '.xsoc.jsonl.read.lock' -and
              $item.Name -ne 'xsoc.jsonl' -and
              $item.Name -notmatch '^xsoc\.jsonl\.[1-4]$')) {
             throw 'Runtime log namespace contains an unexpected object'
         }
+    }
+}
+
+function Test-RuntimeLogNamespace {
+    $valid = @('.xsoc.jsonl.writer.lock', '.xsoc.jsonl.read.lock', 'xsoc.jsonl',
+        'xsoc.jsonl.1', 'xsoc.jsonl.2', 'xsoc.jsonl.3', 'xsoc.jsonl.4') |
+        ForEach-Object {
+            [pscustomobject]@{ Name=$_; PSIsContainer=$false; Attributes=0; Length=0 }
+        }
+    Assert-RuntimeLogNamespace $valid
+    # Duplicate a known name only in memory to isolate the count limit.
+    $cases = @([pscustomobject]@{
+        Items=@($valid) + @($valid[1]); Error='Runtime log namespace exceeds seven fixed entries'
+    })
+    foreach ($bad in @(
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock.extra'; PSIsContainer=$false; Attributes=0; Length=0 },
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$true; Attributes=0; Length=0 },
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=[IO.FileAttributes]::ReparsePoint; Length=0 },
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=0; Length=8388609 }
+    )) {
+        $cases += [pscustomobject]@{
+            Items=@($bad); Error='Runtime log namespace contains an unexpected object'
+        }
+    }
+    foreach ($case in $cases) {
+        $rejected = $false
+        try { Assert-RuntimeLogNamespace $case.Items }
+        catch {
+            if ($_.Exception.Message -ne $case.Error) { throw }
+            $rejected = $true
+        }
+        if (-not $rejected) { throw 'Runtime log namespace regression accepted an invalid fixture' }
+    }
+    Write-Host 'Runtime log namespace verified seven fixed entries and five rejection boundaries.'
+}
+
+function Assert-RuntimeLogsAcl([string]$ServiceSid) {
+    $directory = Join-Path $stateRoot 'logs'
+    $items = @(Get-ChildItem -LiteralPath $directory -Force)
+    Assert-RuntimeLogNamespace $items
+    $paths = @($directory)
+    foreach ($item in $items) {
         $paths += $item.FullName
     }
     foreach ($path in $paths) {
@@ -613,6 +654,8 @@ function Assert-PreservedStateAcl([string]$RetiredServiceSid) {
         }
     }
 }
+
+Test-RuntimeLogNamespace
 
 $existingArpEntries = @(Get-XsocArpEntries)
 $runningTrayProcesses = @(Get-Process -Name "xsoc-tray" `
