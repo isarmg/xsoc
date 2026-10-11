@@ -57,7 +57,7 @@ fn validate_runtime_log_files(
     use xcsc::fs_safety::InventoryLimits;
     validate_runtime_log_account_owner(directory.path(), true)?;
     for file in directory.files(InventoryLimits {
-        max_entries: 6,
+        max_entries: 7,
         max_total_bytes: 40 * 1024 * 1024 + 1024,
     })? {
         let name = file
@@ -67,6 +67,7 @@ fn validate_runtime_log_files(
             .context("Invalid runtime log entry")?;
         ensure!(
             name == ".xsoc.jsonl.writer.lock"
+                || name == ".xsoc.jsonl.read.lock"
                 || name == "xsoc.jsonl"
                 || (1..=4).any(|slot| name == format!("xsoc.jsonl.{slot}")),
             "Unrecognized runtime log entry"
