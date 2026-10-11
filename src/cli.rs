@@ -1909,9 +1909,10 @@ fn windows_runtime_logs(
         })
         .transpose()
         .map_err(|_| fail(2, "invalid_log_level"))?;
-    xcsc::cli::query_rotating_logs(
+    xcsc::cli::query_windows_rotating_logs(
         args,
         "xsoc",
+        &directory,
         |name| match directory.read_private_bounded(
             &EntryName::new(name).map_err(storage_error)?,
             8 * 1024 * 1024,

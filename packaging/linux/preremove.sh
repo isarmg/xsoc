@@ -5,7 +5,7 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 service_name=xsoc.service
-package_version=1.0.2
+package_version=1.0.3
 
 systemd_is_running() {
   [ -d /run/systemd/system ]
