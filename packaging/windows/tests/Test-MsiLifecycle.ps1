@@ -574,9 +574,9 @@ function Open-ExclusiveRuntimeLogLeases([string[]]$Names) {
         foreach ($name in $Names) {
             if ($name -notin @('.xsoc.jsonl.writer.lock', '.xsoc.jsonl.read.lock')) { throw 'Unknown runtime log lease name.' }
             # Existing-only: the real SCM producer owns these files and their ACLs.
-            # The producer permits other read handles, not extra write handles.
-            # A read handle can still hold an exclusive Windows byte-range lock;
-            # our share mode permits the producer's already-open read/write handle.
+            # Its gate handle permits shared reads, not a second writer. Windows
+            # supports an exclusive byte-range lock on a read-only handle; keep
+            # sharing writes so this fixture can coexist with the live producer.
             $stream = [IO.File]::Open((Join-Path $stateRoot "logs\$name"),
                 [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
             try {
