@@ -5,7 +5,9 @@ param(
     [string] $ProductVersion,
     [string] $ArtifactDirectory,
     [string] $LogDirectory,
-    [string] $MaintenanceExecutable
+    [string] $MaintenanceExecutable,
+    [Parameter(Mandatory = $true)]
+    [string] $SmartmontoolsDirectory
 )
 
 Set-StrictMode -Version Latest

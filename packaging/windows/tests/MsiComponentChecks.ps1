@@ -203,40 +203,82 @@ function Test-MsiComponentCoexistence([string]$CurrentMsi, [string]$ProductCode)
     }
 }
 
+function Get-ComponentTransitionBaselineVersion {
+    $version = [version]$ProductVersion
+    if ($version.Build -gt 0) { return "$($version.Major).$($version.Minor).$($version.Build - 1)" }
+    if ($version.Minor -gt 0) { return "$($version.Major).$($version.Minor - 1).65535" }
+    if ($version.Major -gt 0) { return "$($version.Major - 1).255.65535" }
+    throw 'No smaller MSI version is available for the transition fixture.'
+}
+
+function Build-ComponentTransitionBaseline([string]$Version) {
+    # The old product must run its full maintenance sequence: standard MSI
+    # removal alone does not retire the preserved state's service access.
+    # Compile today's source at a distinct version so both helpers can retain
+    # their own rollback journals until the enclosing upgrade commits.
+    $sourceRoot = Join-Path $env:RUNNER_TEMP ('xsoc-transition-source-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $sourceRoot | Out-Null
+    $trackedFiles = @(& git -C $repositoryRoot ls-files)
+    if ($LASTEXITCODE -ne 0 -or $trackedFiles.Count -eq 0) { throw 'Cannot enumerate current fixture sources.' }
+    foreach ($relative in $trackedFiles) {
+        $destination = Join-Path $sourceRoot $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        Copy-Item -LiteralPath (Join-Path $repositoryRoot $relative) -Destination $destination
+    }
+    $utf8 = [Text.UTF8Encoding]::new($false)
+    foreach ($entry in @(
+        @{ File = 'Cargo.toml'; Pattern = '(?m)(^\[workspace\.package\]\r?\nversion = ")[^"]+("\r?$)' },
+        @{ File = 'Cargo.lock'; Pattern = '(?m)(^name = "xsoc"\r?\nversion = ")[^"]+("\r?$)' }
+    )) {
+        $path = Join-Path $sourceRoot $entry.File
+        $text = [IO.File]::ReadAllText($path)
+        if ([regex]::Matches($text, $entry.Pattern).Count -ne 1) {
+            throw "Expected exactly one XSOC version in $($entry.File)."
+        }
+        $text = [regex]::Replace($text, $entry.Pattern, ('${1}' + $Version + '${2}'))
+        [IO.File]::WriteAllText($path, $text, $utf8)
+    }
+    # An isolated target directory cannot overwrite the release Client/helper
+    # that later lifecycle tests invoke. Cargo's download cache is still shared.
+    $targetRoot = Join-Path $sourceRoot 'target'
+    & cargo build --locked --release --manifest-path (Join-Path $sourceRoot 'Cargo.toml') `
+        --target-dir $targetRoot --target x86_64-pc-windows-msvc --bin xsoc --bin xsoc-maintenance | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to build the current-source transition baseline.' }
+    $binaryRoot = Join-Path $targetRoot 'x86_64-pc-windows-msvc\release'
+    & (Join-Path $sourceRoot 'packaging\windows\wix\build-msi.cmd') $Version `
+        (Join-Path $binaryRoot 'xsoc.exe') (Join-Path $binaryRoot 'xsoc-maintenance.exe') `
+        $SmartmontoolsDirectory | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to package the current-source transition baseline.' }
+    $packages = @(Get-ChildItem (Join-Path $sourceRoot 'packaging\windows\wix\bin\x64\Release') `
+        -Filter '*.msi' -Recurse)
+    if ($packages.Count -ne 1) { throw 'Expected exactly one compiled transition baseline MSI.' }
+    $identity = Read-XsocMsiIdentity $packages[0].FullName
+    if ($identity.ProductVersion -ne $Version) { throw 'Compiled transition baseline has the wrong MSI version.' }
+    return $packages[0].FullName
+}
+
+function Assert-ComponentTransitionArtifactsAbsent([string]$Context, [string]$BaselineVersion) {
+    foreach ($version in @($ProductVersion, $BaselineVersion)) {
+        foreach ($name in @("xsoc.install-journal-$version", "xsoc.uninstall-journal-$version",
+            "xsoc.purge-quarantine-$version", "xsoc.maintenance-diagnostic-$version.txt")) {
+            $path = Join-Path $env:ProgramData $name
+            if (Test-Path -LiteralPath $path) { throw "$Context retained a transaction artifact: $path" }
+        }
+    }
+}
+
 function New-ComponentTransitionFixture([string]$Source, [string]$Target, [bool]$Baseline) {
-    # Test-only database copies use the current compiled payload and helper.
-    # They do not represent a previous binary, state format or HostMonitor.
+    # Both packages compile the current source with matching MSI/helper versions.
+    # The baseline changes component ownership, not historical behavior.
     Copy-Item -LiteralPath $Source -Destination $Target
     $installer = New-Object -ComObject WindowsInstaller.Installer
     $database = $installer.OpenDatabase($Target, 1)
     try {
         $queries = @()
         if ($Baseline) {
-            $version = [version]$ProductVersion
-            $lowerVersion = if ($version.Build -gt 0) { "$($version.Major).$($version.Minor).$($version.Build - 1)" }
-                elseif ($version.Minor -gt 0) { "$($version.Major).$($version.Minor - 1).65535" }
-                elseif ($version.Major -gt 0) { "$($version.Major - 1).255.65535" }
-                else { throw 'No smaller MSI version is available for the transition fixture.' }
             $queries += "UPDATE ``Property`` SET ``Value``='{E0F59096-C373-59C0-A835-FDAD36B674F0}' WHERE ``Property``='ProductCode'"
-            $queries += "UPDATE ``Property`` SET ``Value``='$lowerVersion' WHERE ``Property``='ProductVersion'"
             $queries += "UPDATE ``Component`` SET ``ComponentId``='$($foreignComponentGuids[0])' WHERE ``Component``='ClientServiceComponent'"
             $queries += "UPDATE ``Component`` SET ``ComponentId``='$($foreignComponentGuids[1])' WHERE ``Component``='ClientStateDirectoryComponent'"
-            # The payload/helper is still the current binary: changing only the
-            # MSI version cannot create a historical helper's journal namespace.
-            # Leave install preparation intact to create legitimate owned state,
-            # but let this synthetic old product uninstall through standard MSI
-            # component/service rollback alone. Otherwise its deferred commit
-            # and the real new installer both use the current-version journals.
-            foreach ($action in @(
-                'RollbackUninstallPreflight', 'PreflightClientUninstall',
-                'RollbackPreservedState', 'PreserveClientState', 'CommitPreservedState',
-                'RollbackPurgedState', 'PreparePurgedState', 'CommitPurgedState'
-            )) {
-                $authored = @(Read-MsiRows $database "SELECT ``Action`` FROM ``CustomAction`` WHERE ``Action``='$action'" @('Action'))
-                if ($authored.Count -ne 1) { throw "Missing baseline-only uninstall action: $action" }
-                $queries += "DELETE FROM ``InstallExecuteSequence`` WHERE ``Action``='$action'"
-                $queries += "DELETE FROM ``CustomAction`` WHERE ``Action``='$action'"
-            }
             $packageCode = '{1E73B362-88C2-5FC0-8109-3723DECEB0DB}'
         }
         else {
@@ -271,9 +313,13 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
     $baseline = Join-Path $logs 'component-transition-baseline.msi'
     $failedUpgrade = Join-Path $logs 'component-transition-failure.msi'
     $baselineProduct = '{E0F59096-C373-59C0-A835-FDAD36B674F0}'
-    New-ComponentTransitionFixture $CurrentMsi $baseline $true
+    $baselineVersion = Get-ComponentTransitionBaselineVersion
+    $compiledBaseline = Build-ComponentTransitionBaseline $baselineVersion
+    Assert-ComponentTransitionArtifactsAbsent 'Before component transition' $baselineVersion
+    New-ComponentTransitionFixture $compiledBaseline $baseline $true
     New-ComponentTransitionFixture $CurrentMsi $failedUpgrade $false
     Invoke-Msi /i $baseline 'component-transition-baseline'
+    Assert-ComponentTransitionArtifactsAbsent 'Baseline install' $baselineVersion
     Assert-MsiComponentClient $foreignComponentGuids[0] $baselineProduct (Join-Path $installedRoot 'xsoc.exe')
     Assert-MsiComponentClient $foreignComponentGuids[1] $baselineProduct
     $marker = Join-Path $stateRoot '.xsoc-managed-1.0.0'
@@ -288,7 +334,7 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
         -not (Select-String -LiteralPath $failureLog -SimpleMatch 'XSOC fixture abort after old product removal' -Quiet)) {
         throw 'Component transition fixture did not abort at the intended point.'
     }
-    Assert-MaintenanceDiagnosticAbsent 'controlled component-transition rollback'
+    Assert-ComponentTransitionArtifactsAbsent 'Controlled component-transition rollback' $baselineVersion
     if ([Xsoc.MsiNativeMethods]::MsiQueryProductState($baselineProduct) -ne 5 -or
         [Xsoc.MsiNativeMethods]::MsiQueryProductState($ProductCode) -ne -1) {
         throw 'Failed same-family upgrade did not restore the old product registration.'
@@ -304,6 +350,7 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
         throw 'Failed same-family upgrade did not restore the old service and state.'
     }
     Invoke-Msi /i $CurrentMsi 'component-transition-upgrade'
+    Assert-ComponentTransitionArtifactsAbsent 'Component-transition upgrade' $baselineVersion
     Assert-XsocComponentRegistration $ProductCode
     Assert-ArpVersion $ProductVersion
     if ([Xsoc.MsiNativeMethods]::MsiQueryProductState($baselineProduct) -ne -1) { throw 'Successful upgrade retained the old product registration.' }
@@ -315,9 +362,11 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
         throw 'Component identity transition changed retained current-format state.'
     }
     Invoke-Msi /i $CurrentMsi 'component-transition-repair' 'REINSTALL=ALL REINSTALLMODE=amus'
+    Assert-ComponentTransitionArtifactsAbsent 'Component-transition repair' $baselineVersion
     Assert-XsocComponentRegistration $ProductCode
     Invoke-Msi /x $CurrentMsi 'component-transition-purge' 'PURGE=1'
     Assert-ClientCompletelyAbsent
     Assert-XsocComponentRegistrationAbsent $ProductCode
-    Write-Host 'Synthetic current-payload MSI verified old-identity removal, failed-upgrade rollback, upgrade and repair.'
+    Assert-ComponentTransitionArtifactsAbsent 'Component-transition purge' $baselineVersion
+    Write-Host 'Synthetic current-source MSI verified old-identity removal, failed-upgrade rollback, upgrade and repair.'
 }
