@@ -223,17 +223,21 @@ function New-ComponentTransitionFixture([string]$Source, [string]$Target, [bool]
             $queries += "UPDATE ``Component`` SET ``ComponentId``='$($foreignComponentGuids[1])' WHERE ``Component``='ClientStateDirectoryComponent'"
             # The payload/helper is still the current binary: changing only the
             # MSI version cannot create a historical helper's journal namespace.
-            # Leave install preparation intact to create legitimate owned state,
-            # but let this synthetic old product uninstall through standard MSI
-            # component/service rollback alone. Otherwise its deferred commit
-            # and the real new installer both use the current-version journals.
-            foreach ($action in @(
+            # This baseline models standard MSI components/services only. It
+            # must create neither native runtime state nor service-SID grants:
+            # a standard uninstall cannot perform the native ACL retirement.
+            # Native current-package maintenance is exercised by the real new
+            # installer and the full ordinary/held-lease lifecycle below.
+            $baselineNativeActions = @(
+                'RollbackClientInstall', 'PrepareClientInstall',
+                'ApplyClientInstall', 'CommitClientInstall', 'PrepareSetupState',
                 'RollbackUninstallPreflight', 'PreflightClientUninstall',
                 'RollbackPreservedState', 'PreserveClientState', 'CommitPreservedState',
                 'RollbackPurgedState', 'PreparePurgedState', 'CommitPurgedState'
-            )) {
+            )
+            foreach ($action in $baselineNativeActions) {
                 $authored = @(Read-MsiRows $database "SELECT ``Action`` FROM ``CustomAction`` WHERE ``Action``='$action'" @('Action'))
-                if ($authored.Count -ne 1) { throw "Missing baseline-only uninstall action: $action" }
+                if ($authored.Count -ne 1) { throw "Missing baseline-only native action: $action" }
                 $queries += "DELETE FROM ``InstallExecuteSequence`` WHERE ``Action``='$action'"
                 $queries += "DELETE FROM ``CustomAction`` WHERE ``Action``='$action'"
             }
@@ -251,6 +255,15 @@ function New-ComponentTransitionFixture([string]$Source, [string]$Target, [bool]
             $view = $database.OpenView($query)
             try { [void]$view.Execute() }
             finally { [void]$view.Close(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($view) }
+        }
+        if ($Baseline) {
+            foreach ($table in @('CustomAction', 'InstallExecuteSequence')) {
+                foreach ($action in $baselineNativeActions) {
+                    if (@(Read-MsiRows $database "SELECT ``Action`` FROM ``$table`` WHERE ``Action``='$action'" @('Action')).Count -ne 0) {
+                        throw "Synthetic baseline retained a native callback in ${table}: $action"
+                    }
+                }
+            }
         }
         $summary = $database.SummaryInformation(20)
         try {
@@ -276,9 +289,12 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
     Invoke-Msi /i $baseline 'component-transition-baseline'
     Assert-MsiComponentClient $foreignComponentGuids[0] $baselineProduct (Join-Path $installedRoot 'xsoc.exe')
     Assert-MsiComponentClient $foreignComponentGuids[1] $baselineProduct
-    $marker = Join-Path $stateRoot '.xsoc-managed-1.0.0'
-    $markerHash = (Get-FileHash -LiteralPath $marker).Hash
-    $configHash = (Get-FileHash -LiteralPath (Join-Path $stateRoot 'config.json')).Hash
+    foreach ($artifact in @($stateRoot, $installJournal, $uninstallJournal, $purgeQuarantine, $maintenanceDiagnostic)) {
+        if (Test-Path -LiteralPath $artifact) { throw "Standard MSI baseline unexpectedly created native state/transaction artifact: $artifact" }
+    }
+    $baselineExecutable = Join-Path $installedRoot 'xsoc.exe'
+    $baselineExeHash = (Get-FileHash -LiteralPath $baselineExecutable).Hash
+    $baselineService = (Get-CimInstance Win32_Service -Filter "Name='xsoc'").PathName
     # This deliberate Type19 failure is only in the temporary database copy.
     # The release package and production helper have no fault-injection action.
     $failureLog = Join-Path $logs 'component-transition-rollback.log'
@@ -289,6 +305,9 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
         throw 'Component transition fixture did not abort at the intended point.'
     }
     Assert-MaintenanceDiagnosticAbsent 'controlled component-transition rollback'
+    foreach ($artifact in @($stateRoot, $installJournal, $uninstallJournal, $purgeQuarantine, $maintenanceDiagnostic)) {
+        if (Test-Path -LiteralPath $artifact) { throw "Failed transition retained new native state/transaction artifact: $artifact" }
+    }
     if ([Xsoc.MsiNativeMethods]::MsiQueryProductState($baselineProduct) -ne 5 -or
         [Xsoc.MsiNativeMethods]::MsiQueryProductState($ProductCode) -ne -1) {
         throw 'Failed same-family upgrade did not restore the old product registration.'
@@ -299,9 +318,10 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
         if (@(Get-MsiComponentClients $xsocComponentGuids[$id]).Count -ne 0) { throw 'Failed upgrade retained a replacement component client.' }
     }
     if (-not (Get-Service xsoc -ErrorAction Stop) -or
-        (Get-FileHash -LiteralPath $marker).Hash -ne $markerHash -or
-        (Get-FileHash -LiteralPath (Join-Path $stateRoot 'config.json')).Hash -ne $configHash) {
-        throw 'Failed same-family upgrade did not restore the old service and state.'
+        (Get-FileHash -LiteralPath $baselineExecutable).Hash -ne $baselineExeHash -or
+        (Get-CimInstance Win32_Service -Filter "Name='xsoc'").PathName -ne $baselineService -or
+        (Test-Path -LiteralPath $stateRoot)) {
+        throw 'Failed same-family upgrade did not restore the standard MSI service/files without creating native state.'
     }
     Invoke-Msi /i $CurrentMsi 'component-transition-upgrade'
     Assert-XsocComponentRegistration $ProductCode
@@ -310,14 +330,20 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
     foreach ($guid in $foreignComponentGuids) {
         if (@(Get-MsiComponentClients $guid).Count -ne 0) { throw 'Successful upgrade retained an old-identity component client.' }
     }
-    if ((Get-FileHash -LiteralPath $marker).Hash -ne $markerHash -or
-        (Get-FileHash -LiteralPath (Join-Path $stateRoot 'config.json')).Hash -ne $configHash) {
-        throw 'Component identity transition changed retained current-format state.'
-    }
+    # Only the real new installer creates native owned state. Do not invent
+    # historical state or ACL retirement in the standard MSI baseline fixture.
+    Assert-StateAcl
+    $marker = Join-Path $stateRoot '.xsoc-managed-1.0.0'
+    $markerHash = (Get-FileHash -LiteralPath $marker).Hash
+    $configHash = (Get-FileHash -LiteralPath (Join-Path $stateRoot 'config.json')).Hash
     Invoke-Msi /i $CurrentMsi 'component-transition-repair' 'REINSTALL=ALL REINSTALLMODE=amus'
     Assert-XsocComponentRegistration $ProductCode
+    if ((Get-FileHash -LiteralPath $marker).Hash -ne $markerHash -or
+        (Get-FileHash -LiteralPath (Join-Path $stateRoot 'config.json')).Hash -ne $configHash) {
+        throw 'Current installer repair changed its owned state.'
+    }
     Invoke-Msi /x $CurrentMsi 'component-transition-purge' 'PURGE=1'
     Assert-ClientCompletelyAbsent
     Assert-XsocComponentRegistrationAbsent $ProductCode
-    Write-Host 'Synthetic current-payload MSI verified old-identity removal, failed-upgrade rollback, upgrade and repair.'
+    Write-Host 'Standard MSI baseline verified old-identity removal and rollback; real current installer verified upgrade, owned state and repair.'
 }
