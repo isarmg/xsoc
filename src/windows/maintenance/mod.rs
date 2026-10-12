@@ -929,8 +929,10 @@ mod windows_maintenance {
     use windows::{
         Win32::{
             Foundation::{
-                CloseHandle, ERROR_NOT_ALL_ASSIGNED, ERROR_SERVICE_DOES_NOT_EXIST, ERROR_SUCCESS,
-                GENERIC_WRITE, GetLastError, HANDLE, HLOCAL, LocalFree, SetLastError,
+                CloseHandle, ERROR_INVALID_PARAMETER, ERROR_NOT_ALL_ASSIGNED,
+                ERROR_SERVICE_CANNOT_ACCEPT_CTRL, ERROR_SERVICE_DOES_NOT_EXIST,
+                ERROR_SERVICE_NOT_ACTIVE, ERROR_SUCCESS, GENERIC_WRITE, GetLastError, HANDLE,
+                HLOCAL, LocalFree, SetLastError, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
             },
             Security::{
                 AdjustTokenPrivileges,
@@ -969,7 +971,10 @@ mod windows_maintenance {
                     SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOP, SERVICE_STOP_PENDING,
                     SERVICE_STOPPED, SERVICE_WIN32_OWN_PROCESS, StartServiceW,
                 },
-                Threading::{GetCurrentProcess, OpenProcessToken},
+                Threading::{
+                    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_SYNCHRONIZE,
+                    WaitForSingleObject,
+                },
             },
             UI::Shell::{FOLDERID_ProgramData, KF_FLAG_DEFAULT, SHGetKnownFolderPath},
         },

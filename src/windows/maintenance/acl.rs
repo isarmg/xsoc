@@ -32,9 +32,7 @@ fn secure_state_acl(path: &Path, service_sid: Option<&str>) -> anyhow::Result<()
     Ok(())
 }
 
-fn existing_runtime_logs(
-    path: &Path,
-) -> anyhow::Result<Option<xcsc::fs_safety::PrivateDirectory>> {
+fn existing_runtime_logs(path: &Path) -> anyhow::Result<Option<xcsc::fs_safety::PrivateDirectory>> {
     use xcsc::fs_safety::{PrivateDirectory, WindowsPrivateAccess};
     let logs = path.join("logs");
     match fs::symlink_metadata(&logs) {
@@ -51,10 +49,8 @@ fn existing_runtime_logs(
     }
 }
 
-fn validate_runtime_log_files(
-    directory: &xcsc::fs_safety::PrivateDirectory,
-) -> anyhow::Result<()> {
-    use xcsc::fs_safety::InventoryLimits;
+fn validate_runtime_log_files(directory: &xcsc::fs_safety::PrivateDirectory) -> anyhow::Result<()> {
+    use xcsc::fs_safety::{InventoryLimits, PrivateFileAccess};
     validate_runtime_log_account_owner(directory.path(), true)?;
     for file in directory.files(InventoryLimits {
         max_entries: 7,
@@ -72,8 +68,22 @@ fn validate_runtime_log_files(
                 || (1..=4).any(|slot| name == format!("xsoc.jsonl.{slot}")),
             "Unrecognized runtime log entry"
         );
-        validate_runtime_log_account_owner(&directory.path().join(file.name.as_path()), false)?;
-        directory.read_private_bounded(&file.name, 8 * 1024 * 1024)?;
+        // Pin this exact private object through owner and payload validation.
+        // Range locks do not prevent metadata/security queries, but even a
+        // byte read at EOF can fail with ERROR_LOCK_VIOLATION on Windows.
+        let held = directory.open_private_file(&file.name, PrivateFileAccess::ReadOnly)?;
+        let path = directory.path().join(file.name.as_path());
+        validate_runtime_log_file_account_owner(held.file(), &path)?;
+        if matches!(name, ".xsoc.jsonl.writer.lock" | ".xsoc.jsonl.read.lock") {
+            ensure!(
+                held.file().metadata()?.len() == 0,
+                "Runtime log lock file is not empty"
+            );
+        } else {
+            directory.read_private_bounded(&file.name, 8 * 1024 * 1024)?;
+        }
+        held.verify()?;
+        validate_runtime_log_file_account_owner(held.file(), &path)?;
     }
     Ok(())
 }
@@ -84,6 +94,18 @@ fn validate_runtime_log_files(
 // narrower ownership requirement; exact effective ACLs stay in the shared API.
 fn validate_runtime_log_account_owner(path: &Path, directory: bool) -> anyhow::Result<()> {
     let (sddl, is_directory) = security_descriptor_sddl_with_target_type(path)?;
+    ensure!(
+        is_directory == directory,
+        "Runtime log object does not have the declared service account type"
+    );
+    validate_runtime_log_owner_sddl(&sddl)
+}
+
+fn validate_runtime_log_file_account_owner(file: &fs::File, path: &Path) -> anyhow::Result<()> {
+    validate_runtime_log_owner_sddl(&security_descriptor_sddl_for_file(file, path)?)
+}
+
+fn validate_runtime_log_owner_sddl(sddl: &str) -> anyhow::Result<()> {
     let owner = sddl.strip_prefix("O:").and_then(|value| {
         value
             .split_once("G:")
@@ -91,7 +113,7 @@ fn validate_runtime_log_account_owner(path: &Path, directory: bool) -> anyhow::R
             .map(|(owner, _)| owner)
     });
     ensure!(
-        is_directory == directory && matches!(owner, Some("LS" | "S-1-5-19")),
+        matches!(owner, Some("LS" | "S-1-5-19")),
         "Runtime log object does not have the declared service account owner"
     );
     Ok(())
@@ -632,12 +654,16 @@ fn security_descriptor_sddl_from_handle(
     handle: &AclTargetHandle,
     path: &Path,
 ) -> anyhow::Result<String> {
+    security_descriptor_sddl_for_file(&handle.file, path)
+}
+
+fn security_descriptor_sddl_for_file(file: &fs::File, path: &Path) -> anyhow::Result<String> {
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
     // SAFETY: The no-delete-shared target stays live. Outputs are SDK-owned
     // and immediately receive RAII ownership before the status is checked.
     let status = unsafe {
         GetSecurityInfo(
-            handle.raw(),
+            HANDLE(file.as_raw_handle()),
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
             None,

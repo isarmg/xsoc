@@ -135,7 +135,12 @@ fn service_main_inner() -> anyhow::Result<()> {
     super::init_tracing()?;
     let runtime = super::build_runtime()?;
 
-    match runtime.block_on(super::execute_config(config, command, Some(report_running))) {
+    let result = runtime.block_on(super::execute_config(config, command, Some(report_running)));
+    // Runtime teardown can still wait for blocking collectors and release
+    // their resources. Keep STOP_PENDING until that teardown has finished.
+    // Process-lifetime log handles are released only when this process exits.
+    drop(runtime);
+    match result {
         Ok(()) => {
             xcsc::log::LogRecord::client(
                 "xsoc",

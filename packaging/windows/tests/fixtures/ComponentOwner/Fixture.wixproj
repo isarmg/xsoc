@@ -1,0 +1,10 @@
+<Project Sdk="WixToolset.Sdk/4.0.6">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <Platform>x64</Platform>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <DefineConstants>ClientExe=$(ClientExe)</DefineConstants>
+    <OutputName>xsoc-component-owner-fixture</OutputName>
+  </PropertyGroup>
+</Project>

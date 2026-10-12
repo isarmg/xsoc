@@ -14,14 +14,14 @@ Windows 11 x64、Linux x86_64（systemd，提供 DEB/RPM）和 macOS Apple Silic
 
 ## 快速部署
 
-以下包名按 1.0.4 发布准备；正式下载以发布页已经完成验证的资产为准。
+以下包名按 1.0.5 发布准备；正式下载以发布页已经完成验证的资产为准。
 
 从 [Release](https://github.com/isarmg/xsoc/releases) 下载本机平台的安装包及对应 `SHA256SUMS-*`，核对 SHA-256 后安装。准备 xsos 管理员提供的 HTTPS 地址与实例授权码。
 
-Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.4.x86_64.rpm`）：
+Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.5.x86_64.rpm`）：
 
 ```sh
-sudo apt install ./xsoc_1.0.4_amd64.deb
+sudo apt install ./xsoc_1.0.5_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json
@@ -30,13 +30,13 @@ sudo xsoc status --check --format json
 macOS Apple Silicon：
 
 ```sh
-sudo installer -pkg ./xsoc-1.0.4-macos-arm64-unsigned.pkg -target /
+sudo installer -pkg ./xsoc-1.0.5-macos-arm64-unsigned.pkg -target /
 sudo /usr/local/bin/xsoc service stop
 sudo /usr/local/bin/xsoc setup --interactive
 sudo /usr/local/bin/xsoc status --check --format json
 ```
 
-Windows：运行 `xsoc-1.0.4-x64.msi` 完成安装，再打开新的管理员 PowerShell：
+Windows：运行 `xsoc-1.0.5-x64.msi` 完成安装，再打开新的管理员 PowerShell：
 
 ```powershell
 xsoc service stop
@@ -55,7 +55,7 @@ git clone https://github.com/isarmg/xsoc.git
 cd xsoc
 XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --bin xsoc
 sh packaging/linux/build-packages.sh
-sudo apt install ./dist/xsoc_1.0.4_amd64.deb
+sudo apt install ./dist/xsoc_1.0.5_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json

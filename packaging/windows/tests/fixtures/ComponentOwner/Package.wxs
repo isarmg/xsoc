@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- Test only: a different product owning the identifiers found in the user's
+       external MSI registration. This is not UnionC or a historical XSOC build. -->
+  <Package Name="XSOC unrelated component-owner fixture" Manufacturer="XSOC tests"
+           Version="1.0.0" Scope="perMachine" InstallerVersion="500"
+           ProductCode="7A95BCC3-EA7E-5FA4-9054-1EC80237628C"
+           UpgradeCode="D0E5E1F9-B73A-5497-AE58-FCBD25EC5EC5" Compressed="yes">
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="FOREIGNROOT" Name="xsoc-component-owner-fixture">
+        <Component Id="ForeignServiceComponent" Guid="C7D313C7-1B72-4826-8FA4-5BF10928349E" Bitness="always64">
+          <!-- Reuse the already built payload only for SCM registration; never start it. -->
+          <File Id="ForeignExecutable" Source="$(var.ClientExe)" Name="component-owner.exe" KeyPath="yes" />
+          <ServiceInstall Id="ForeignService" Name="xsoc-component-owner-fixture"
+                          DisplayName="XSOC component-owner test fixture" Type="ownProcess"
+                          Start="demand" ErrorControl="normal" Account="NT AUTHORITY\LocalService" />
+          <ServiceControl Id="RemoveForeignService" Name="xsoc-component-owner-fixture"
+                          Stop="both" Remove="uninstall" Wait="yes" />
+          <RemoveFolder Id="RemoveForeignRoot" On="uninstall" />
+        </Component>
+        <Component Id="ForeignStateComponent" Guid="55346DF8-69D2-425D-B574-F80379CB87A2" Bitness="always64">
+          <RegistryValue Root="HKLM" Key="Software\sarmg\xsoc-component-owner-fixture"
+                         Name="ManagedStateDirectory" Type="string" Value="[FOREIGNROOT]" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+    <Feature Id="ForeignFeature" Level="1">
+      <ComponentRef Id="ForeignServiceComponent" />
+      <ComponentRef Id="ForeignStateComponent" />
+    </Feature>
+  </Package>
+</Wix>

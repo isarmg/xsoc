@@ -207,7 +207,7 @@ fn rollback_install(paths: &FixedPaths) -> anyhow::Result<()> {
 }
 
 fn commit_install(paths: &FixedPaths) -> anyhow::Result<()> {
-    if !paths.journal_root.exists() {
+    if !rollback_path_exists(&paths.journal_root, "install journal")? {
         return Ok(());
     }
     validate_real_directory(&paths.journal_root, "install journal")?;
@@ -304,7 +304,7 @@ fn rollback_uninstall_preflight(paths: &FixedPaths) -> anyhow::Result<()> {
 }
 
 fn preserve_state(paths: &FixedPaths) -> anyhow::Result<()> {
-    if !paths.state_root.exists() {
+    if !rollback_path_exists(&paths.state_root, "state root")? {
         return Ok(());
     }
     let mut snapshot = read_uninstall_snapshot(paths)?;
@@ -374,7 +374,7 @@ fn rollback_uninstall(paths: &FixedPaths) -> anyhow::Result<()> {
 }
 
 fn commit_uninstall(paths: &FixedPaths) -> anyhow::Result<()> {
-    if !paths.uninstall_journal_root.exists() {
+    if !rollback_path_exists(&paths.uninstall_journal_root, "uninstall journal")? {
         return Ok(());
     }
     read_uninstall_snapshot(paths)?;
@@ -384,7 +384,7 @@ fn commit_uninstall(paths: &FixedPaths) -> anyhow::Result<()> {
 fn prepare_purge(paths: &FixedPaths) -> anyhow::Result<()> {
     read_uninstall_snapshot(paths)?;
     ensure_absent(&paths.quarantine_root, "pending purge quarantine")?;
-    if !paths.state_root.exists() {
+    if !rollback_path_exists(&paths.state_root, "state root")? {
         return Ok(());
     }
     validate_real_directory(&paths.state_root, "state root")?;
@@ -432,11 +432,11 @@ fn rollback_purge(paths: &FixedPaths) -> anyhow::Result<()> {
 }
 
 fn commit_purge(paths: &FixedPaths) -> anyhow::Result<()> {
-    let journal_existed = paths.uninstall_journal_root.exists();
+    let journal_existed = rollback_path_exists(&paths.uninstall_journal_root, "uninstall journal")?;
     if journal_existed {
         read_uninstall_snapshot(paths)?;
     }
-    let deletion = if paths.quarantine_root.exists() {
+    let deletion = if rollback_path_exists(&paths.quarantine_root, "purge quarantine")? {
         validate_real_directory(&paths.quarantine_root, "purge quarantine")
             .and_then(|_| validate_tree(&paths.quarantine_root))
             .and_then(|_| remove_tree_no_reparse(&paths.quarantine_root))

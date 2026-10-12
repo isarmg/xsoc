@@ -102,11 +102,21 @@ fn service_is_active(service: &ServiceHandle) -> anyhow::Result<bool> {
 fn wait_for_stable_service_state(
     service: &ServiceHandle,
 ) -> anyhow::Result<windows::Win32::System::Services::SERVICE_STATUS_CURRENT_STATE> {
-    let deadline = Instant::now() + STOP_TIMEOUT;
+    Ok(
+        wait_for_stable_service_status_until(service, Instant::now() + STOP_TIMEOUT)?
+            .dwCurrentState,
+    )
+}
+
+fn wait_for_stable_service_status_until(
+    service: &ServiceHandle,
+    deadline: Instant,
+) -> anyhow::Result<SERVICE_STATUS_PROCESS> {
     loop {
-        let state = query_service_status(service)?.dwCurrentState;
+        let status = query_service_status(service)?;
+        let state = status.dwCurrentState;
         if state == SERVICE_RUNNING || state == SERVICE_STOPPED {
-            return Ok(state);
+            return Ok(status);
         }
         ensure!(
             state == SERVICE_START_PENDING || state == SERVICE_STOP_PENDING,
@@ -117,7 +127,9 @@ fn wait_for_stable_service_state(
             Instant::now() < deadline,
             "xsoc did not reach a stable state within 30 seconds"
         );
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(
+            Duration::from_millis(250).min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
 }
 
@@ -125,7 +137,14 @@ fn wait_for_service_state(
     service: &ServiceHandle,
     expected: windows::Win32::System::Services::SERVICE_STATUS_CURRENT_STATE,
 ) -> anyhow::Result<()> {
-    let deadline = Instant::now() + STOP_TIMEOUT;
+    wait_for_service_state_until(service, expected, Instant::now() + STOP_TIMEOUT)
+}
+
+fn wait_for_service_state_until(
+    service: &ServiceHandle,
+    expected: windows::Win32::System::Services::SERVICE_STATUS_CURRENT_STATE,
+    deadline: Instant,
+) -> anyhow::Result<()> {
     loop {
         let state = query_service_status(service)?.dwCurrentState;
         if state == expected {
@@ -137,19 +156,121 @@ fn wait_for_service_state(
             expected.0,
             state.0
         );
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(
+            Duration::from_millis(250).min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+}
+
+struct ProcessHandle(HANDLE);
+
+impl Drop for ProcessHandle {
+    fn drop(&mut self) {
+        // SAFETY: Only a successful OpenProcess transfers this unique handle.
+        let _ = unsafe { CloseHandle(self.0) };
+    }
+}
+
+fn open_process_for_wait(process_id: u32) -> anyhow::Result<ProcessHandle> {
+    ensure!(
+        process_id != 0,
+        "running xsoc service has no valid process ID"
+    );
+    // SAFETY: SYNCHRONIZE allows waiting only, not termination or mutation.
+    // The non-inheritable owned handle pins this process rather than its PID.
+    unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, process_id) }
+        .map(ProcessHandle)
+        .context("failed to pin the original xsoc service process")
+}
+
+fn wait_for_process_exit(process: &ProcessHandle, deadline: Instant) -> anyhow::Result<()> {
+    let remaining = deadline
+        .saturating_duration_since(Instant::now())
+        .as_millis();
+    // Never pass INFINITE, including when the deadline is already exhausted.
+    let milliseconds = u32::try_from(remaining)
+        .unwrap_or(u32::MAX - 1)
+        .min(u32::MAX - 1);
+    // SAFETY: The original process handle remains owned for the whole finite wait.
+    match unsafe { WaitForSingleObject(process.0, milliseconds) } {
+        WAIT_OBJECT_0 => Ok(()),
+        WAIT_TIMEOUT => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "the original xsoc service process did not exit within the maintenance deadline",
+        )
+        .into()),
+        WAIT_FAILED => Err(std::io::Error::last_os_error())
+            .context("failed to wait for the original xsoc service process"),
+        result => bail!("unexpected process wait result {}", result.0),
     }
 }
 
 fn stop_client_service(service: &ServiceHandle) -> anyhow::Result<()> {
-    if wait_for_stable_service_state(service)? != SERVICE_STOPPED {
+    let deadline = Instant::now() + STOP_TIMEOUT;
+    let initial = wait_for_stable_service_status_until(service, deadline)?;
+    let process = if initial.dwCurrentState == SERVICE_RUNNING {
+        // SCM's PID is valid while RUNNING. It is not valid in STOPPED and
+        // may be invalid in pending states: never guess or enumerate processes.
+        match open_process_for_wait(initial.dwProcessId) {
+            Ok(process) => {
+                let current = query_service_status(service)?;
+                match current.dwCurrentState {
+                    SERVICE_RUNNING => ensure!(
+                        current.dwProcessId == initial.dwProcessId,
+                        "xsoc service process changed while acquiring its maintenance handle"
+                    ),
+                    SERVICE_STOP_PENDING | SERVICE_STOPPED => {}
+                    state => bail!(
+                        "xsoc service changed to unexpected state {} while acquiring its maintenance handle",
+                        state.0
+                    ),
+                }
+                Some(process)
+            }
+            Err(error)
+                if error
+                    .downcast_ref::<windows::core::Error>()
+                    .is_some_and(|native| {
+                        native.code().0 == hresult_from_win32(ERROR_INVALID_PARAMETER.0)
+                    })
+                    && query_service_status(service)?.dwCurrentState == SERVICE_STOPPED =>
+            {
+                None
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    if initial.dwCurrentState != SERVICE_STOPPED {
         let mut status = SERVICE_STATUS::default();
         // SAFETY: A live service handle with STOP access and initialized status
         // output are borrowed only for the synchronous control call.
-        unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) }
-            .context("failed to stop xsoc for maintenance")?;
+        if let Err(error) = unsafe { ControlService(service.0, SERVICE_CONTROL_STOP, &mut status) }
+        {
+            let repeated_stop = [
+                ERROR_SERVICE_NOT_ACTIVE.0,
+                ERROR_SERVICE_CANNOT_ACCEPT_CTRL.0,
+            ]
+            .iter()
+            .any(|code| error.code().0 == hresult_from_win32(*code));
+            if !repeated_stop
+                || !matches!(
+                    query_service_status(service)?.dwCurrentState,
+                    SERVICE_STOP_PENDING | SERVICE_STOPPED
+                )
+            {
+                return Err(error).context("failed to stop xsoc for maintenance");
+            }
+        }
     }
-    wait_for_service_state(service, SERVICE_STOPPED)
+    wait_for_service_state_until(service, SERVICE_STOPPED, deadline)?;
+    if let Some(process) = process {
+        // STOPPED can precede runtime teardown and release of process-lifetime
+        // logging handles. Wait for that exact process, not a later PID lookup.
+        wait_for_process_exit(&process, deadline)?;
+    }
+    Ok(())
 }
 
 fn restore_service_state(
@@ -206,9 +327,7 @@ fn query_service_config(service: &ServiceHandle) -> anyhow::Result<Vec<usize>> {
     // SAFETY: The size query deliberately supplies no output storage.
     let first = unsafe { QueryServiceConfigW(service.0, None, 0, &mut needed) };
     ensure!(
-        first.is_err()
-            && needed >= size_of::<QUERY_SERVICE_CONFIGW>() as u32
-            && needed <= 8192,
+        first.is_err() && needed >= size_of::<QUERY_SERVICE_CONFIGW>() as u32 && needed <= 8192,
         "could not determine xsoc configuration size"
     );
     let words = (needed as usize).div_ceil(size_of::<usize>());
@@ -336,17 +455,22 @@ impl Drop for NativeArguments {
 }
 
 fn split_windows_command_line(command_line: &str) -> anyhow::Result<Vec<String>> {
-    ensure!(command_line.encode_utf16().count() <= 8192, "service ImagePath exceeds its limit");
+    ensure!(
+        command_line.encode_utf16().count() <= 8192,
+        "service ImagePath exceeds its limit"
+    );
     let wide = wide_null(OsStr::new(command_line));
     let mut count = 0;
     // SAFETY: The terminated input and initialized count output remain live;
     // the SDK returns a single allocation containing pointers and their strings.
-    let raw = unsafe {
-        windows::Win32::UI::Shell::CommandLineToArgvW(PCWSTR(wide.as_ptr()), &mut count)
-    };
+    let raw =
+        unsafe { windows::Win32::UI::Shell::CommandLineToArgvW(PCWSTR(wide.as_ptr()), &mut count) };
     ensure!(!raw.is_null(), "failed to parse service ImagePath");
     let arguments = NativeArguments(raw);
-    ensure!((1..=128).contains(&count), "service ImagePath argument count exceeds its limit");
+    ensure!(
+        (1..=128).contains(&count),
+        "service ImagePath argument count exceeds its limit"
+    );
     // SAFETY: A successful SDK call initialized exactly count entries in the
     // still-owned allocation; each string remains valid until arguments drops.
     let values = unsafe { std::slice::from_raw_parts(arguments.0, count as usize) }
@@ -362,14 +486,22 @@ fn split_windows_command_line(command_line: &str) -> anyhow::Result<Vec<String>>
 
 fn service_config_string(buffer: &[usize], value: PWSTR) -> anyhow::Result<String> {
     let base = buffer.as_ptr() as usize;
-    let end = base.checked_add(std::mem::size_of_val(buffer)).context("service config bounds overflow")?;
+    let end = base
+        .checked_add(std::mem::size_of_val(buffer))
+        .context("service config bounds overflow")?;
     let pointer = value.as_ptr() as usize;
-    ensure!(pointer >= base && pointer < end && pointer.is_multiple_of(2), "service config string is outside its returned buffer");
+    ensure!(
+        pointer >= base && pointer < end && pointer.is_multiple_of(2),
+        "service config string is outside its returned buffer"
+    );
     let units = (end - pointer) / 2;
     // SAFETY: The pointer was checked for u16 alignment and lies in the live
     // usize-backed allocation; this view ends before its allocation boundary.
     let text = unsafe { std::slice::from_raw_parts(value.as_ptr(), units) };
-    let length = text.iter().position(|unit| *unit == 0).context("service config string is not terminated")?;
+    let length = text
+        .iter()
+        .position(|unit| *unit == 0)
+        .context("service config string is not terminated")?;
     String::from_utf16(&text[..length]).context("service config string is invalid UTF-16")
 }
 
@@ -437,5 +569,39 @@ mod service_bounds_tests {
         );
         assert!(split_windows_command_line(&"x".repeat(8193)).is_err());
         assert!(split_windows_command_line(&"x ".repeat(129)).is_err());
+    }
+
+    #[test]
+    fn process_wait_times_out_without_termination_then_observes_real_exit() {
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Start-Sleep -Milliseconds 2000",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start a bounded native child process");
+        let process = open_process_for_wait(child.id()).unwrap();
+        let error =
+            wait_for_process_exit(&process, Instant::now() + Duration::from_millis(1)).unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::TimedOut
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "waiting must not terminate the child"
+        );
+        wait_for_process_exit(&process, Instant::now() + Duration::from_secs(15)).unwrap();
+        assert!(child.wait().unwrap().success());
+        // A signalled original process is still observable after the deadline
+        // is exhausted; no lookup of the potentially reusable PID is involved.
+        wait_for_process_exit(&process, Instant::now() - Duration::from_secs(1)).unwrap();
     }
 }

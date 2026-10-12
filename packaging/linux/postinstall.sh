@@ -5,7 +5,7 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
 service_name=xsoc.service
-package_version=1.0.4
+package_version=1.0.5
 client_binary=/usr/bin/xsoc
 account_state_dir=/var/lib/xsoc-package
 state_dir=/var/lib/xsoc

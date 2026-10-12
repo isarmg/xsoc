@@ -89,10 +89,21 @@ namespace Xsoc {
             string componentCode,
             StringBuilder path,
             ref uint pathLength);
+
+        [DllImport("msi.dll", EntryPoint = "MsiEnumClientsW",
+            CharSet = CharSet.Unicode, ExactSpelling = true)]
+        public static extern uint MsiEnumClients(
+            string componentCode, uint index, StringBuilder productCode);
+
+        [DllImport("msi.dll", EntryPoint = "MsiQueryProductStateW",
+            CharSet = CharSet.Unicode, ExactSpelling = true)]
+        public static extern int MsiQueryProductState(string productCode);
     }
 }
 "@
 }
+
+. (Join-Path $PSScriptRoot 'MsiComponentChecks.ps1')
 
 function Get-MaintenanceDiagnosticItem {
     try {
@@ -510,6 +521,7 @@ function Assert-RuntimeLogNamespace([object[]]$Items) {
         if ($item.PSIsContainer -or
             ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
             $item.Length -gt 8388608 -or
+            (($item.Name -eq '.xsoc.jsonl.writer.lock' -or $item.Name -eq '.xsoc.jsonl.read.lock') -and $item.Length -ne 0) -or
             ($item.Name -ne '.xsoc.jsonl.writer.lock' -and
              $item.Name -ne '.xsoc.jsonl.read.lock' -and
              $item.Name -ne 'xsoc.jsonl' -and
@@ -534,7 +546,9 @@ function Test-RuntimeLogNamespace {
         [pscustomobject]@{ Name='.xsoc.jsonl.read.lock.extra'; PSIsContainer=$false; Attributes=0; Length=0 },
         [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$true; Attributes=0; Length=0 },
         [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=[IO.FileAttributes]::ReparsePoint; Length=0 },
-        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=0; Length=8388609 }
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=0; Length=8388609 },
+        [pscustomobject]@{ Name='.xsoc.jsonl.read.lock'; PSIsContainer=$false; Attributes=0; Length=1 },
+        [pscustomobject]@{ Name='.xsoc.jsonl.writer.lock'; PSIsContainer=$false; Attributes=0; Length=1 }
     )) {
         $cases += [pscustomobject]@{
             Items=@($bad); Error='Runtime log namespace contains an unexpected object'
@@ -549,7 +563,42 @@ function Test-RuntimeLogNamespace {
         }
         if (-not $rejected) { throw 'Runtime log namespace regression accepted an invalid fixture' }
     }
-    Write-Host 'Runtime log namespace verified seven fixed entries and five rejection boundaries.'
+    Write-Host 'Runtime log namespace verified seven fixed entries and seven rejection boundaries.'
+}
+
+function Open-ExclusiveRuntimeLogLeases([string[]]$Names) {
+    $handles = @()
+    try {
+        foreach ($name in $Names) {
+            if ($name -notin @('.xsoc.jsonl.writer.lock', '.xsoc.jsonl.read.lock')) { throw 'Unknown runtime log lease name.' }
+            # Existing-only: the real SCM producer owns these files and their ACLs.
+            $stream = [IO.File]::Open((Join-Path $stateRoot "logs\$name"),
+                [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite)
+            try {
+                if ($stream.Length -ne 0) { throw 'Runtime log lease must remain zero-length.' }
+                $stream.Lock(0, 1)
+                $handles += $stream
+            }
+            catch { $stream.Dispose(); throw }
+        }
+        return ,$handles
+    }
+    catch {
+        $openFailure = $_
+        try { Close-ExclusiveRuntimeLogLeases $handles }
+        finally { throw $openFailure }
+    }
+}
+
+function Close-ExclusiveRuntimeLogLeases([IO.FileStream[]]$Handles) {
+    $failure = $null
+    foreach ($stream in $Handles) {
+        try { $stream.Unlock(0, 1) }
+        catch { $failure = $_ }
+        try { $stream.Dispose() }
+        catch { $failure = $_ }
+    }
+    if ($null -ne $failure) { throw $failure }
 }
 
 function Assert-RuntimeLogsAcl([string]$ServiceSid) {
@@ -680,6 +729,10 @@ if ($currentPackages.Count -ne 1) {
     throw "Expected exactly one release MSI; found $($currentPackages.Count)."
 }
 $currentMsi = $currentPackages[0].FullName
+$currentMsiIdentity = Read-XsocMsiIdentity $currentMsi
+if ($currentMsiIdentity.ProductVersion -ne $ProductVersion) { throw 'Compiled MSI version differs from its tested payload version.' }
+Test-MsiComponentCoexistence $currentMsi $currentMsiIdentity.ProductCode
+Test-MsiComponentTransition $currentMsi $currentMsiIdentity.ProductCode
 
 # An unowned pre-existing state root must never be handed to LocalService.
 New-Item -ItemType Directory -Path $stateRoot | Out-Null
@@ -724,6 +777,7 @@ Invoke-Msi /x $currentMsi "purge-orphan-fixture" "PURGE=1"
 Assert-ClientCompletelyAbsent
 
 Invoke-Msi /i $currentMsi "fresh-install"
+Assert-XsocComponentRegistration $currentMsiIdentity.ProductCode
 Assert-InstallLocation $installedRoot
 Assert-MachinePathInstalled
 if ((Get-Service xsoc).Status -ne "Stopped") { throw "Fresh install must not start before pairing" }
@@ -1055,7 +1109,12 @@ foreach ($entry in @(Get-ChildItem -LiteralPath (Join-Path $stateRoot 'logs') -F
 if ($null -eq $preUninstallActive -or $fixtureLogBytes -ge 1048576) {
     throw 'Controlled fixture logs do not have the required margin below the 8MiB rotation boundary'
 }
-Invoke-Msi /x $currentMsi "preserve-uninstall"
+# Keep the real producer running. Only the reader gate can be held externally
+# while its lifetime writer lease is already held by the service itself.
+$activeReaderLease = Open-ExclusiveRuntimeLogLeases @('.xsoc.jsonl.read.lock')
+try { Invoke-Msi /x $currentMsi "preserve-uninstall-held-reader" }
+finally { Close-ExclusiveRuntimeLogLeases $activeReaderLease }
+Assert-XsocComponentRegistrationAbsent $currentMsiIdentity.ProductCode
 
 if (Get-Service -Name "xsoc" -ErrorAction SilentlyContinue) {
     throw "Client service survived ordinary uninstall."
@@ -1121,6 +1180,36 @@ if ((Get-Content -LiteralPath (Join-Path $stateRoot 'host-id') -Raw) -ne $fixtur
 Assert-RuntimeLogsAcl $installedServiceSid
 foreach ($entry in $preservedLogHashes.GetEnumerator()) {
     if ((Get-RuntimeLogHash $entry.Key) -ne $entry.Value) { throw 'Repair changed retained runtime log bytes before SCM restart' }
+}
+
+# Reinstall/repair has not restarted SCM, so both real producer-created leases
+# can now be held by an external process for the entire ordinary uninstall.
+$lockedLeaseHandles = Open-ExclusiveRuntimeLogLeases @('.xsoc.jsonl.writer.lock', '.xsoc.jsonl.read.lock')
+try {
+    Invoke-Msi /x $currentMsi 'preserve-uninstall-held-writer-and-reader'
+    Assert-XsocComponentRegistrationAbsent $currentMsiIdentity.ProductCode
+    if ((Get-Service xsoc -ErrorAction SilentlyContinue) -or
+        (Test-Path -LiteralPath $installedRoot) -or @(Get-XsocArpEntries).Count -ne 0) {
+        throw 'Stopped uninstall with held log leases left service, programs or product registration.'
+    }
+    if ((Get-Content -LiteralPath (Join-Path $stateRoot 'host-id') -Raw) -ne $fixtureIdentity -or
+        (Get-FileHash -LiteralPath (Join-Path $stateRoot $stateMarker)).Hash -ne $preservedMarkerHash) {
+        throw 'Held-lease uninstall changed preserved identity or ownership marker.'
+    }
+    Assert-PreservedStateAcl $installedServiceSid
+    Assert-RuntimeLogsAcl $installedServiceSid
+    foreach ($entry in $preservedLogHashes.GetEnumerator()) {
+        if ((Get-RuntimeLogHash $entry.Key) -ne $entry.Value) { throw 'Held-lease uninstall changed retained runtime log bytes.' }
+    }
+    if ($lockedLeaseHandles.Count -ne 2 -or @($lockedLeaseHandles | Where-Object { $_.Length -ne 0 }).Count -ne 0) {
+        throw 'Expected both unchanged zero-length log leases to remain open across uninstall.'
+    }
+}
+finally { Close-ExclusiveRuntimeLogLeases $lockedLeaseHandles }
+Invoke-Msi /i $currentMsi 'reinstall-after-held-log-leases'
+Assert-XsocComponentRegistration $currentMsiIdentity.ProductCode
+foreach ($entry in $preservedLogHashes.GetEnumerator()) {
+    if ((Get-RuntimeLogHash $entry.Key) -ne $entry.Value) { throw 'Reinstall after held leases changed retained log bytes.' }
 }
 
 try { Start-Service xsoc -ErrorAction Stop } catch {

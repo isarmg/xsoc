@@ -164,6 +164,37 @@ if ($features.Count -ne 1 -or $features[0].Id -ne "ClientFeature" -or $features[
 }
 $componentIds = @($package.SelectNodes("//w:Component", $namespace) |
     ForEach-Object { $_.Id } | Sort-Object)
+$expectedComponentGuids = @{
+    ClientServiceComponent = '56AF4FAC-C353-598B-A680-CFBE4A86F6B2'
+    ClientStateDirectoryComponent = 'C9DB8E14-008D-5261-831F-D51ED951BFB7'
+    SmartmontoolsRuntimeComponent = '4FB7E776-817C-4C70-AB62-2DB7111DD15A'
+    SmartmontoolsComplianceComponent = '67F64859-953F-411A-A6E6-A3D65466EEEF'
+}
+if ($componentIds.Count -ne $expectedComponentGuids.Count) {
+    throw 'Every product component needs an explicitly reviewed stable identity.'
+}
+$seenComponentGuids = @{}
+foreach ($componentId in $componentIds) {
+    if (-not $expectedComponentGuids.ContainsKey($componentId)) {
+        throw "Unexpected product component: $componentId"
+    }
+    $component = Select-One "//w:Component[@Id='$componentId']"
+    $guid = [Guid]::Parse($component.GetAttribute('Guid')).ToString('D').ToUpperInvariant()
+    Assert-Equal $guid $expectedComponentGuids[$componentId] `
+        "Component identity must remain fixed for the same resource set: $componentId"
+    Assert-Equal $component.Bitness 'always64' 'All current components own x64 resources.'
+    if ($seenComponentGuids.ContainsKey($guid) -or $guid -eq $product.UpgradeCode) {
+        throw "Component identity is duplicated or aliases the product upgrade family: $guid"
+    }
+    $seenComponentGuids[$guid] = $true
+}
+$serviceKeyPath = Select-One "//w:Component[@Id='ClientServiceComponent']/w:File[@KeyPath='yes']"
+Assert-Equal $serviceKeyPath.Id 'ClientExecutable' 'The service component key path must be the XSOC executable.'
+Assert-Equal $serviceKeyPath.Name 'xsoc.exe' 'The service component must own the XSOC executable name.'
+$stateKeyPath = Select-One "//w:Component[@Id='ClientStateDirectoryComponent']/w:RegistryValue[@KeyPath='yes']"
+Assert-Equal $stateKeyPath.Root 'HKLM' 'State registration must remain machine-wide.'
+Assert-Equal $stateKeyPath.Key 'Software\sarmg\xsoc' 'State registration must be XSOC-private.'
+Assert-Equal $stateKeyPath.Name 'ManagedStateDirectory' 'The state component registry key path drifted.'
 $requiredComponentIds = @($features[0].SelectNodes("w:ComponentRef", $namespace) |
     ForEach-Object { $_.Id } | Sort-Object)
 if (@(Compare-Object -ReferenceObject $componentIds -DifferenceObject $requiredComponentIds).Count -ne 0) {

@@ -56,9 +56,10 @@
     <StandardDirectory Id="ProgramMenuFolder" />
 
     <DirectoryRef Id="INSTALLFOLDER">
+      <!-- XSOC-private identity. Keep stable while this x64 resource set and key path stay unchanged. -->
       <Component
         Id="ClientServiceComponent"
-        Guid="{C7D313C7-1B72-4826-8FA4-5BF10928349E}"
+        Guid="{56AF4FAC-C353-598B-A680-CFBE4A86F6B2}"
         Bitness="always64">
         <File
           Id="ClientExecutable"
@@ -129,9 +130,10 @@
       ordinary uninstall.
     -->
     <DirectoryRef Id="STATEDIRECTORY">
+      <!-- The XSOC registry key path is not shared with another product's state registration. -->
       <Component
         Id="ClientStateDirectoryComponent"
-        Guid="{55346DF8-69D2-425D-B574-F80379CB87A2}"
+        Guid="{C9DB8E14-008D-5261-831F-D51ED951BFB7}"
         Bitness="always64">
         <RegistryValue
           Root="HKLM"
