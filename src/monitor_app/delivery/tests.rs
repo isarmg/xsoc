@@ -182,31 +182,70 @@ mod tests {
         assert_eq!(cadence.deadline(), start + Duration::from_secs(35));
     }
 
+    fn sampling_cadence_report(interval_seconds: f64) -> ClientReport {
+        // Synthetic counters keep cadence tests independent of the host and its devices.
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "report_id": "00000000-0000-4000-8000-000000000001",
+            "collected_at": "2026-10-12T00:00:00Z",
+            "host": {
+                "id": "00000000-0000-4000-8000-000000000002", "os": "linux",
+                "os_version": null, "kernel_version": null, "arch": "x86_64",
+                "client_version": env!("CARGO_PKG_VERSION")
+            },
+            "interval_seconds": interval_seconds,
+            "system": {
+                "hardware": null, "uptime_seconds": 7200,
+                "cpu": { "usage_percent": 10.0, "logical_count": 1,
+                    "physical_count": 1, "per_core_percent": [10.0] },
+                "memory": { "total_bytes": 100, "used_bytes": 50,
+                    "available_bytes": 50, "swap_total_bytes": 0, "swap_used_bytes": 0 },
+                "networks": [{ "name": "eth0", "received_bytes_total": 7200000,
+                    "transmitted_bytes_total": 14400000, "received_bytes_per_second": 1000.0,
+                    "transmitted_bytes_per_second": 2000.0, "packets_received_total": 3,
+                    "packets_transmitted_total": 4, "receive_errors_total": 0, "transmit_errors_total": 0 }],
+                "disks": [{ "name": "disk", "mount_point": "/data", "file_system": "ext4",
+                    "total_bytes": 100, "available_bytes": 50, "read_bytes_total": 21600000,
+                    "written_bytes_total": 28800000, "read_bytes_per_second": 3000.0,
+                    "written_bytes_per_second": 4000.0, "is_read_only": false }],
+                "temperatures": [], "gpus": []
+            },
+            "capabilities": [], "client": { "spool_pending_batches": 0, "collector_errors": 0 }
+        })).unwrap()
+    }
+
     #[test]
-    fn first_run_report_advertises_the_next_sampling_cadence() {
-        let mut sampler = SystemSampler::new();
-        let mut report = sampler.collect(transient_host_identity(Uuid::new_v4()), 3600, 0);
-        let measured_network_rates: Vec<_> = report.system.networks.iter()
-            .map(|network| (network.received_bytes_per_second, network.transmitted_bytes_per_second))
-            .collect();
-        let measured_disk_rates: Vec<_> = report.system.disks.iter()
-            .map(|disk| (disk.read_bytes_per_second, disk.written_bytes_per_second))
-            .collect();
-        let mut first_report = true;
-
-        advertise_first_sampling_cadence(&mut report, Duration::from_secs(3600), &mut first_report);
+    fn every_run_report_advertises_cadence_without_changing_sample_metrics() {
+        // Startup, normal sampling, jitter and the bounded sample after a long pause.
+        for measured_interval in [0.2, 10.0, 25.0, 3600.0] {
+            let mut report = sampling_cadence_report(measured_interval);
+            let mut expected = report.clone();
+            expected.interval_seconds = 10.0;
+            advertise_sampling_cadence(&mut report, Duration::from_secs(10));
+            assert_eq!(report, expected);
+        }
+        let mut report = sampling_cadence_report(0.2);
+        advertise_sampling_cadence(&mut report, Duration::from_secs(3600));
         assert_eq!(report.interval_seconds, 3600.0);
-        assert!(!first_report);
-        assert_eq!(report.system.networks.iter()
-            .map(|network| (network.received_bytes_per_second, network.transmitted_bytes_per_second))
-            .collect::<Vec<_>>(), measured_network_rates);
-        assert_eq!(report.system.disks.iter()
-            .map(|disk| (disk.read_bytes_per_second, disk.written_bytes_per_second))
-            .collect::<Vec<_>>(), measured_disk_rates);
+    }
 
-        report.interval_seconds = 25.0;
-        advertise_first_sampling_cadence(&mut report, Duration::from_secs(3600), &mut first_report);
-        assert_eq!(report.interval_seconds, 25.0);
+    #[test]
+    fn resumed_report_and_next_normal_report_declare_the_resumed_cadence() {
+        let mut cadence = SamplingCadence::starting_now();
+        let resumed_at = cadence.deadline() + Duration::from_secs(7200);
+        let configured = Duration::from_secs(10);
+        let mut report = sampling_cadence_report(3600.0);
+        advertise_sampling_cadence(&mut report, configured);
+        cadence.schedule_next(configured, resumed_at);
+        assert_eq!(report.interval_seconds, 10.0);
+        assert_eq!(cadence.deadline(), resumed_at + configured);
+
+        let mut next = sampling_cadence_report(10.0);
+        advertise_sampling_cadence(&mut next, configured);
+        let next_at = cadence.deadline();
+        cadence.schedule_next(configured, next_at);
+        assert_eq!(next.interval_seconds, 10.0);
+        assert_eq!(cadence.deadline(), next_at + configured);
     }
 
     #[tokio::test(start_paused = true)]

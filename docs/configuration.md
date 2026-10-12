@@ -87,7 +87,7 @@ OTLP 的网络和磁盘字节计数保留操作系统累计值，使用 monotoni
 
 OTLP HTTP 200 的 Protobuf 响应会检查 `partial_success`：拒收数据点时记录 `xsoc.otlp.partial_success` 和数量；只含警告时记录 `xsoc.otlp.collector_warning`。具体原因请查询 Collector 日志，客户端不回显服务端自由文本。依照 [OTLP 部分成功规则](https://opentelemetry.io/docs/specs/otlp/#partial-success-1)，部分成功不重试，以免重复已接收的数据点；可选 OTLP 导出不改变主服务端上报的确认状态。
 
-常驻 `run` 启动后立即采集第一份报告。首报的 `interval_seconds` 向服务端声明配置的下次采样周期，供在线状态估算；网络和磁盘速率仍按从采样器初始化到首报的实测时间计算。后续报告的 `interval_seconds` 使用实测采样周期，并限制在协议范围内。休眠或进程暂停使实测周期超过协议上限时，网络和磁盘速率仍使用完整实测时间，不因报告周期被截断而虚高。
+常驻 `run` 启动后立即采集第一份报告。每份报告的 `interval_seconds` 都向服务端声明配置的采样周期，供在线状态和补传滞后估算；启动预热、休眠或进程暂停不会改变该声明。网络和磁盘速率独立使用相邻采样的完整实测时间计算，首报则使用从采样器初始化开始的实测时间，不因报告声明的周期不同而虚高。`probe`、`once` 和 `doctor --delivery` 没有后续常驻采样，报告仍保留协议范围内的实测间隔；移动宿主仍自行提供间隔。
 
 ## 3. 修改、校验和提交
 
