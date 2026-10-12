@@ -203,7 +203,7 @@ jobs:
         run: |
           $packages = @(Get-ChildItem packaging/windows/wix/bin/x64/Release -Filter '*.msi' -Recurse)
           if ($packages.Count -ne 1) { throw 'Expected exactly one native MSI' }
-          .\packaging\windows\tests\Test-MsiLifecycle.ps1 -ProductVersion $env:XSOC_VERSION -ArtifactDirectory $packages[0].DirectoryName -LogDirectory "$env:RUNNER_TEMP\xsoc-msi-logs"
+          .\packaging\windows\tests\Test-MsiLifecycle.ps1 -ProductVersion $env:XSOC_VERSION -ArtifactDirectory $packages[0].DirectoryName -LogDirectory "$env:RUNNER_TEMP\xsoc-msi-logs" -SmartmontoolsDirectory "$env:RUNNER_TEMP\xsoc-smartmontools\payload"
       - name: Validate macOS packaging lifecycle
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'macOS') }}
         shell: bash
