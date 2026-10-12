@@ -221,6 +221,22 @@ function New-ComponentTransitionFixture([string]$Source, [string]$Target, [bool]
             $queries += "UPDATE ``Property`` SET ``Value``='$lowerVersion' WHERE ``Property``='ProductVersion'"
             $queries += "UPDATE ``Component`` SET ``ComponentId``='$($foreignComponentGuids[0])' WHERE ``Component``='ClientServiceComponent'"
             $queries += "UPDATE ``Component`` SET ``ComponentId``='$($foreignComponentGuids[1])' WHERE ``Component``='ClientStateDirectoryComponent'"
+            # The payload/helper is still the current binary: changing only the
+            # MSI version cannot create a historical helper's journal namespace.
+            # Leave install preparation intact to create legitimate owned state,
+            # but let this synthetic old product uninstall through standard MSI
+            # component/service rollback alone. Otherwise its deferred commit
+            # and the real new installer both use the current-version journals.
+            foreach ($action in @(
+                'RollbackUninstallPreflight', 'PreflightClientUninstall',
+                'RollbackPreservedState', 'PreserveClientState', 'CommitPreservedState',
+                'RollbackPurgedState', 'PreparePurgedState', 'CommitPurgedState'
+            )) {
+                $authored = @(Read-MsiRows $database "SELECT ``Action`` FROM ``CustomAction`` WHERE ``Action``='$action'" @('Action'))
+                if ($authored.Count -ne 1) { throw "Missing baseline-only uninstall action: $action" }
+                $queries += "DELETE FROM ``InstallExecuteSequence`` WHERE ``Action``='$action'"
+                $queries += "DELETE FROM ``CustomAction`` WHERE ``Action``='$action'"
+            }
             $packageCode = '{1E73B362-88C2-5FC0-8109-3723DECEB0DB}'
         }
         else {
