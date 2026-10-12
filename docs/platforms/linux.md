@@ -4,24 +4,26 @@
 
 ## 安装并配对
 
-先完成[安装前准备](../platform-setup.md#开始前准备)。从 [1.0.1 Release](https://github.com/isarmg/xsoc/releases/tag/v1.0.1) 下载 `xsoc_1.0.1_amd64.deb`（Debian/Ubuntu）或 `xsoc-1.0.1.x86_64.rpm`（RPM），以及 `SHA256SUMS-Linux-x86_64`。
+以下包名按 1.0.4 发布准备，正式下载以发布页已经完成验证的资产为准。
+
+先完成[安装前准备](../platform-setup.md#开始前准备)。从 [Release](https://github.com/isarmg/xsoc/releases) 下载 `xsoc_1.0.4_amd64.deb`（Debian/Ubuntu）或 `xsoc-1.0.4.x86_64.rpm`（RPM），以及 `SHA256SUMS-Linux-x86_64`。
 
 进入下载目录，先核对安装包摘要：
 
 ```sh
-sha256sum xsoc_1.0.1_amd64.deb
+sha256sum xsoc_1.0.4_amd64.deb
 ```
 
 将输出与 `SHA256SUMS-Linux-x86_64` 中对应行比较。随后执行：
 
 ```sh
-sudo apt install ./xsoc_1.0.1_amd64.deb
+sudo apt install ./xsoc_1.0.4_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json
 ```
 
-RPM 系统先执行 `sha256sum xsoc-1.0.1.x86_64.rpm`，与同一校验文件中的 RPM 行比较，一致后改用 `sudo dnf install ./xsoc-1.0.1.x86_64.rpm` 安装；后续设置相同。包管理器安装 smartmontools 等运行依赖。
+RPM 系统先执行 `sha256sum xsoc-1.0.4.x86_64.rpm`，与同一校验文件中的 RPM 行比较，一致后改用 `sudo dnf install ./xsoc-1.0.4.x86_64.rpm` 安装；后续设置相同。包管理器安装 smartmontools 等运行依赖。
 
 向导各项输入与成功标准见[向导输入与完成结果](../platform-setup.md#向导输入与完成结果)。随后按[日常使用](../usage.md)核对服务、绑定和最新报告。
 
@@ -42,7 +44,7 @@ sudo journalctl -u xsoc.service -n 100 --no-pager
 - NVIDIA / GPU 设备不可见：默认 systemd 单元启用 `PrivateDevices=yes`。安装器检测设备后会显示本机适用的组权限与 `/usr/share/xsoc/xsoc-gpu.conf` 启用步骤；确认允许服务访问设备后再采用这些步骤。该 drop-in 会取消私有设备隔离。
 - SMART 或 DMI 权限不足：先停止服务，运行 `sudo xsoc probe --format json` 检查对应能力及设备权限，结束后恢复服务；读取要求见[硬件监控](../hardware-monitoring.md)。
 
-同版 DEB 可用 `sudo apt install --reinstall ./xsoc_1.0.1_amd64.deb` 修复，保留业务状态。RPM 使用已校验的同版包执行 `sudo dnf reinstall ./xsoc-1.0.1.x86_64.rpm`。修复后检查版本、服务与业务连接。
+同版 DEB 可用 `sudo apt install --reinstall ./xsoc_1.0.4_amd64.deb` 修复，保留业务状态。RPM 使用已校验的同版包执行 `sudo dnf reinstall ./xsoc-1.0.4.x86_64.rpm`。修复后检查版本、服务与业务连接。
 
 ## 卸载
 
@@ -64,7 +66,7 @@ XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --bin xsoc
 NFPM_BIN="$(go env GOPATH)/bin/nfpm" sh packaging/linux/build-packages.sh
 ```
 
-生成 `dist/xsoc_1.0.1_amd64.deb` 和 `dist/xsoc-1.0.1.x86_64.rpm`。构建器核对 Cargo 版本、ELF 架构和版本标记；使用默认 `target/release/xsoc` 路径，不使用自定义 `CARGO_TARGET_DIR`。
+生成 `dist/xsoc_1.0.4_amd64.deb` 和 `dist/xsoc-1.0.4.x86_64.rpm`。构建器核对 Cargo 版本、ELF 架构和版本标记；使用默认 `target/release/xsoc` 路径，不使用自定义 `CARGO_TARGET_DIR`。
 
 通用工具链、质量检查和源码说明见[开发指南](../development.md)。原生安装器构建成功后，还需在对应系统验证安装、服务生命周期和真实设备行为。
 

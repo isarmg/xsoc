@@ -59,15 +59,15 @@ fn client_version_output() -> &'static str {
     CLIENT_VERSION_OUTPUT
 }
 
-/// Server contract upper bound for the measured interval in reports.
+/// Server contract upper bound for the interval declared in reports.
 ///
 /// `xsos-protocol` is the sole source of HTTP contract bounds, used by client configuration and server validation.
 /// SQLite uses `0 < interval_seconds <= 3600` as a coarse storage constraint; client configuration uses
 /// integer seconds (at least 1) and validates the worst jitter-adjusted cycle, so these bounds are related but distinct.
 ///
-/// The report `interval_seconds` is actual elapsed time. Out-of-range values cause every report
-/// to be permanently rejected with 400; the delivery worker acknowledges and discards these reports from spool.
-/// Reject invalid configuration at startup rather than leaving users to trace recurring data gaps in logs.
+/// The daemon declares its configured cadence; one-shot collection retains bounded elapsed time.
+/// Byte rates always use the actual elapsed sampling window independently of this declaration.
+/// Keep the existing supported scheduling range, including jitter, validated at startup.
 pub const MAX_REPORT_INTERVAL_SECONDS: u64 = xsos_protocol::CLIENT_REPORT_MAX_INTERVAL_SECONDS;
 
 /// Client configuration alias for the shared protocol lower bound.
@@ -458,15 +458,14 @@ impl ClientConfig {
             bail!("jitter_percent must not exceed 50");
         }
         // Ticker jitter determines the normal sampling cycle; a separate worker performs network delivery.
-        // Validate the server reporting bound against maximum jitter: 3600 seconds with 10% jitter can reach
+        // Keep the supported sampling-cycle bound against maximum jitter: 3600 seconds with 10% jitter can reach
         // 3960 seconds. Reject excessive settings at startup and report the usable upper bound for the current jitter.
         let worst_case_cycle = self.worst_case_cycle_seconds();
         if worst_case_cycle > MAX_REPORT_INTERVAL_SECONDS as f64 {
             bail!(
                 "interval_seconds ({}) with jitter_percent ({}) can produce a measured interval \
-                 of up to {worst_case_cycle:.0}s, which exceeds the server contract limit of \
-                 {MAX_REPORT_INTERVAL_SECONDS}s; such reports are rejected with HTTP 400 and \
-                 discarded from the spool. Use interval_seconds <= {} at this jitter, \
+                 of up to {worst_case_cycle:.0}s, which exceeds the supported sampling-cycle limit of \
+                 {MAX_REPORT_INTERVAL_SECONDS}s. Use interval_seconds <= {} at this jitter, \
                  or lower jitter_percent",
                 self.interval_seconds,
                 self.jitter_percent,
@@ -1323,10 +1322,10 @@ mod tests {
         }
     }
 
-    /// The contract upper bound constrains the measured cycle. Delivery is decoupled, so the normal cycle depends only on
+    /// The supported upper bound constrains the measured cycle. Delivery is decoupled, so the normal cycle depends only on
     /// ticker jitter. With nonzero default jitter, a base interval equal to the upper bound necessarily exceeds it.
     ///
-    /// Startup validation must reject upper-bound intervals with jitter so every runtime report satisfies the contract.
+    /// Startup validation retains the supported scheduling range even though the daemon advertises the base cadence.
     #[test]
     fn rejects_interval_at_the_contract_limit_because_jitter_pushes_it_over() {
         let config = config_with_interval(MAX_REPORT_INTERVAL_SECONDS);
@@ -1339,8 +1338,8 @@ mod tests {
             .expect_err("an upper-bound interval with jitter necessarily exceeds the contract and must be rejected");
         let message = error.to_string();
         assert!(
-            message.contains("3600") && message.contains("400"),
-            "the error must explain the bound and consequences; received: {message}"
+            message.contains("3600") && message.contains("sampling-cycle limit"),
+            "the error must explain the supported bound; received: {message}"
         );
     }
 
