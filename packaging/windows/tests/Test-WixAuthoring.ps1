@@ -500,4 +500,21 @@ $legacyFile = Select-One "//w:RemoveFile[@Id='RemoveLegacyTrayFile']"
 Assert-Equal $legacyFile.Name "xsoc-tray.exe" "Legacy cleanup must not use wildcard paths."
 Assert-Equal $legacyFile.On "install" "Legacy UI cleanup belongs to installation."
 
+# A live producer holds the reader gate with FILE_SHARE_READ. The fixture must
+# request only read access while still taking an exclusive byte-range lock.
+$leaseTokens = $null
+$leaseErrors = $null
+$lifecycleAst = [Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PSScriptRoot 'Test-MsiLifecycle.ps1'), [ref]$leaseTokens, [ref]$leaseErrors)
+$leaseFunctions = @($lifecycleAst.FindAll({ param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Open-ExclusiveRuntimeLogLeases'
+}, $true))
+Assert-Equal $leaseFunctions.Count 1 "Expected exactly one runtime lease fixture opener."
+$leaseText = $leaseFunctions[0].Body.Extent.Text
+Assert-Contains $leaseText '[IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite' `
+    "The lease fixture must coexist with the live producer without requesting write access."
+Assert-Contains $leaseText '$stream.Lock(0, 1)' `
+    "Read-only fixture handles must still hold an exclusive byte-range lock."
+
 Write-Host "WiX MSI authoring passed current-only lifecycle, CLI, service, rollback, and purge checks."
