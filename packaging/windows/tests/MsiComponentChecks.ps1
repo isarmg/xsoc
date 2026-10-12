@@ -266,7 +266,8 @@ function Test-MsiComponentTransition([string]$CurrentMsi, [string]$ProductCode) 
     # This deliberate Type19 failure is only in the temporary database copy.
     # The release package and production helper have no fault-injection action.
     $failureLog = Join-Path $logs 'component-transition-rollback.log'
-    $result = Start-Process msiexec.exe -ArgumentList "/i `"$failedUpgrade`" /qn /norestart /l*v `"$failureLog`" -Wait -PassThru
+    $failureArguments = '/i "{0}" /qn /norestart /l*v "{1}"' -f $failedUpgrade, $failureLog
+    $result = Start-Process msiexec.exe -ArgumentList $failureArguments -Wait -PassThru
     if ($result.ExitCode -ne 1603 -or
         -not (Select-String -LiteralPath $failureLog -SimpleMatch 'XSOC fixture abort after old product removal' -Quiet)) {
         throw 'Component transition fixture did not abort at the intended point.'

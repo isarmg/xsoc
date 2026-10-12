@@ -18,6 +18,17 @@ $helperPath = Join-Path $clientRoot "src\bin\xsoc-maintenance.rs"
 $mainPath = Join-Path $clientRoot "src\main.rs"
 $helperSourceRoot = Join-Path $clientRoot "src\windows\maintenance"
 
+# Validate the real lifecycle helpers with the current PowerShell parser before
+# building an MSI, including helpers that are loaded by dot-sourcing at runtime.
+foreach ($script in @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter '*.ps1' -Recurse -File)) {
+    $tokens = $null
+    $parseErrors = $null
+    [void][Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors)
+    if (@($parseErrors).Count -ne 0) {
+        throw "Invalid packaging test script $($script.FullName): $($parseErrors[0].Message)"
+    }
+}
+
 foreach ($required in @(
     $packagePath, $projectPath, $buildPath, $fetchPath, $smartNoticePath, $workspacePath,
     $helperPath, $mainPath
