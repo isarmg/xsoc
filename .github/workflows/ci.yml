@@ -147,10 +147,25 @@ jobs:
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Linux') }}
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/isarmg/xsos.git "$RUNNER_TEMP/xsos"
-          npm ci --prefix "$RUNNER_TEMP/xsos/web"
-          npm --prefix "$RUNNER_TEMP/xsos/web" run build
-          cargo run --locked --quiet --target x86_64-unknown-linux-gnu --manifest-path "$RUNNER_TEMP/xsos/Cargo.toml" -p xsos --example validate-client-pairing < contracts/host-pairing-v1.json
+          server_source="$RUNNER_TEMP/xsos"
+          git clone --depth 1 https://github.com/isarmg/xsos.git "$server_source"
+          # Preserve latest-Server compatibility, but resolve it only once per run.
+          server_revision="$(git -C "$server_source" rev-parse HEAD)"
+          [[ "$server_revision" =~ ^[0-9a-f]{40}$ ]]
+          git -C "$server_source" checkout --detach "$server_revision"
+          printf 'Client revision: %s\nServer revision: %s\n' "$(git rev-parse HEAD)" "$server_revision"
+          npm ci --prefix "$server_source/web"
+          npm --prefix "$server_source/web" run build
+          # Reuse this job's target/cache and one server build for both contracts.
+          cargo build --locked --target x86_64-unknown-linux-gnu \
+            --target-dir "$GITHUB_WORKSPACE/target" --manifest-path "$server_source/Cargo.toml" \
+            -p xsos --bin xsos --example validate-client-pairing --example host-flow-fixture
+          server_bin="$GITHUB_WORKSPACE/target/x86_64-unknown-linux-gnu/debug"
+          "$server_bin/examples/validate-client-pairing" < contracts/host-pairing-v1.json
+          cargo build --locked -p xsoc --bin xsoc
+          python3 "$server_source/scripts/check-host-userflow.py" \
+            --server "$server_bin/xsos" --fixture "$server_bin/examples/host-flow-fixture" \
+            --client "$GITHUB_WORKSPACE/target/debug/xsoc"
       - name: Check without optional features
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: cargo check --locked -p xsoc --no-default-features --all-targets
