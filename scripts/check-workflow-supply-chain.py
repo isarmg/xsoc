@@ -20,6 +20,8 @@ EXACT_DESKTOP_MATRIX = "os: [ubuntu-24.04, windows-2025, macos-26]"
 MAX_TIMEOUT_MINUTES = 60
 MAX_WORKFLOW_BYTES = 1024 * 1024
 PINNED_OFFICIAL_ACTIONS = {
+    # Official actions/cache v4.2.4 tag, verified against its upstream Git ref.
+    "actions/cache": "0400d5f644dc74513175e3cd8d07132dd4860809",
     "actions/upload-artifact": "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
     "actions/download-artifact": "3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
     # Exact official commits already selected by this repository.
@@ -160,7 +162,15 @@ def validate_job(source: str, header: Line, segment: list[Line]) -> None:
             runners[0],
             "matrix.os must use the exact fixed desktop runner matrix",
         )
-    if runner != "${{ matrix.os }}" and desktop_matrices:
+    # The status-only gate retains historical matrix check names without
+    # reserving native runners a second time after their actual tests finish.
+    desktop_gate = (
+        header.content == "xsoc:"
+        and runner == "ubuntu-24.04"
+        and any(line.indent == 4 and line.content == "name: Desktop xsoc (${{ matrix.os }})" for line in segment)
+        and any(line.indent == 4 and line.content == "needs: [scope, desktop-checks, native-packages]" for line in segment)
+    )
+    if runner != "${{ matrix.os }}" and desktop_matrices and not desktop_gate:
         raise fail(source, desktop_matrices[0], "desktop runner matrix is unused")
 
     timeouts = matching_job_property(segment, TIMEOUT_KEY)
@@ -401,6 +411,8 @@ jobs:
         "    runs-on: ${{ matrix.os }}\n",
     )
     validate_workflow("positive-matrix-fixture.yml", matrix)
+    gate = matrix.replace("  test:\n", "  xsoc:\n    name: Desktop xsoc (${{ matrix.os }})\n    needs: [scope, desktop-checks, native-packages]\n").replace("runs-on: ${{ matrix.os }}", "runs-on: ubuntu-24.04")
+    validate_workflow("positive-status-gate-fixture.yml", gate)
     publication = base.replace("  test:\n", "  publish:\n    if: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}\n    needs:\n      - verified\n").replace("contents: read", "contents: write")
     validate_workflow("positive-publication-fixture.yml", publication)
     cases = {
@@ -417,6 +429,8 @@ jobs:
         ),
         "unpinned service image": base.replace("@sha256:" + "0" * 64, ":latest"),
         "floating desktop matrix": matrix.replace("windows-2025", "windows-latest"),
+        "unused native matrix": matrix.replace("runs-on: ${{ matrix.os }}", "runs-on: ubuntu-24.04"),
+        "incomplete status gate": gate.replace("needs: [scope, desktop-checks, native-packages]", "needs: [scope, desktop-checks]"),
     }
     for label, fixture in cases.items():
         try:

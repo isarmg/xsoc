@@ -49,3 +49,35 @@ XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --features
 ```
 
 OTLP 在主服务确认报告后尽力导出，使用独立目标和凭据。移动端构建与宿主职责见上面的独立平台入口。
+
+
+### CI parallelism and caches
+
+Every non-documentation push, PR, dispatch and release tag still runs both the
+three-platform code-check matrix and the three-platform native-package matrix.
+The existing `Desktop xsoc (...)` checks aggregate both matrices and fail if
+scope detection, either matrix, or a package lifecycle check fails. Publication
+still depends on that aggregate plus the mobile and OTLP checks.
+
+Cargo caches are separated by OS, architecture, Rust version, job and Cargo
+manifest/lock hash. Each commit writes a new key; an older matching dependency
+cache may be restored, but all Cargo commands and executable source-identity
+checks run again. Cache hits never substitute for tests, inventory generation,
+license/advisory checks, package extraction or lifecycle validation.
+
+The inventory-tool cache contains only isolated source-built cargo-audit 0.22.2
+and cargo-cyclonedx 0.5.9 installs. Its exact key includes OS, architecture,
+Rust version and the complete installer-script hash, with no fallback key.
+Misses use Cargo's locked crates.io installation; hits verify the binary SHA-256
+manifest before execution and then verify each tool version. The manifest
+catches incomplete/corrupt restores, not a malicious cache plus forged manifest;
+GitHub's repository/ref-scoped cache permissions remain the trust boundary.
+No downloaded third-party binary distribution replaces the locked source build.
+
+The pre-optimization Windows sample took 26m30s, including 7m25s to build these
+tools, 2m21s Clippy, 2m44s debug tests, 2m41s release binaries, 2m28s release-policy
+tests and 5m26s MSI lifecycle. Parallel checks plus warm tool/build caches target
+roughly 8–12 minutes for normal pushes. A wholly cold cache is expected to need
+roughly 17–20 minutes because source-built tools and genuine MSI transitions
+remain mandatory. These are estimates, not measured guarantees; compare the
+exact-commit workflow timings after the first cold run and next warm run.

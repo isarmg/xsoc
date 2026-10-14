@@ -69,10 +69,10 @@ jobs:
           echo "run_full=$run_full" >> "$GITHUB_OUTPUT"
           echo "Full validation: $run_full"
 
-  xsoc:
+  desktop-checks:
     needs: scope
     if: ${{ !cancelled() }}
-    name: Desktop xsoc (${{ matrix.os }})
+    name: Desktop checks (${{ matrix.os }})
     permissions:
       contents: read
     timeout-minutes: 60
@@ -93,12 +93,25 @@ jobs:
       - name: Install exact Rust toolchain
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: rustup toolchain install 1.99.0 --profile minimal --component clippy
+      - name: Cache Cargo build inputs and outputs
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: xsoc-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-rust-1.99.0-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+          restore-keys: |
+            xsoc-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-rust-1.99.0-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
       - name: Verify locked client support boundary
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: python scripts/check-xcsc-source.py
-      - name: Install explicit Apple Silicon desktop target
-        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'macOS') }}
-        run: rustup target add --toolchain 1.99.0 aarch64-apple-darwin
+      - name: Verify CI supply-chain and cache contracts
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        run: |
+          python scripts/check-workflow-supply-chain.py
+          python scripts/test-ci-inventory-tools.py
       - name: Verify release inputs
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: python scripts/collect-release.py --check
@@ -108,50 +121,6 @@ jobs:
         with:
           node-version: 26.7.0
           check-latest: false
-      - name: Provide exact LLVM native dependency reader
-        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
-        shell: pwsh
-        run: |
-          $reader=Join-Path $env:ProgramFiles 'LLVM\bin\llvm-readobj.exe'
-          $exact=Test-Path -LiteralPath $reader
-          if ($exact) { $exact=(& $reader --version) -match 'LLVM version 20[.]1[.]8' }
-          if (-not $exact) {
-            choco install llvm --version=20.1.8 --force --yes --no-progress
-            if ($LASTEXITCODE) { throw 'Exact LLVM reader installation failed' }
-          }
-          $version=& $reader --version
-          if ($LASTEXITCODE -or -not ($version -match 'LLVM version 20[.]1[.]8')) { throw 'Required LLVM reader differs from its exact version' }
-          (Split-Path -Parent $reader) >> $env:GITHUB_PATH
-      - name: Install exact runtime inventory tools
-        if: ${{ needs.scope.outputs.run_full != 'false' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo install --locked cargo-audit --version 0.22.2
-          cargo install --locked cargo-cyclonedx --version 0.5.9
-      - name: Install native RPM readers
-        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Linux' }}
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y rpm rpm2cpio libarchive-tools
-      - name: Install exact WiX extraction tool
-        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
-        run: dotnet tool install --global wix --version 4.0.6
-      - name: Resolve Windows MSI version from Cargo metadata
-        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
-        id: xsoc_version
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed." }
-          $clientPackage = @($metadata.packages | Where-Object name -eq "xsoc")
-          if ($clientPackage.Count -ne 1) {
-              throw "cargo metadata did not contain exactly one xsoc package."
-          }
-          $version = $clientPackage[0].version
-          if ($version -notmatch '^\d+\.\d+\.\d+$') {
-              throw "Windows MSI requires a strict MAJOR.MINOR.PATCH Cargo version; found '$version'."
-          }
-          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Clippy
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: cargo clippy --locked -p xsoc --all-targets -- -D warnings
@@ -192,14 +161,124 @@ jobs:
       - name: Validate Linux package builder
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Linux') }}
         run: sh packaging/linux/tests/test-build-packages.sh
+      - name: Validate installer defaults with release HTTPS policy
+        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
+        run: cargo test --locked --release -p xsoc --target x86_64-pc-windows-msvc --lib installer_default_is_valid_under_release_https_policy
+      - name: Validate macOS packaging lifecycle
+        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'macOS') }}
+        shell: bash
+        run: sh packaging/macos/tests/validate-packaging.sh
+
+  native-packages:
+    needs: scope
+    if: ${{ !cancelled() }}
+    name: Native packages (${{ matrix.os }})
+    permissions:
+      contents: read
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Documentation-only change
+        if: ${{ needs.scope.outputs.run_full == 'false' }}
+        shell: bash
+        run: echo "Documentation-only change; heavy build steps are not needed."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        with:
+          persist-credentials: false
+      - name: Install exact Rust toolchain
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy
+      - name: Cache Cargo build inputs and outputs
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: xsoc-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-rust-1.99.0-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+          restore-keys: |
+            xsoc-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-rust-1.99.0-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
+      - name: Verify locked client support boundary
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        run: python scripts/check-xcsc-source.py
+      - name: Verify CI supply-chain and cache contracts
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        run: |
+          python scripts/check-workflow-supply-chain.py
+          python scripts/test-ci-inventory-tools.py
+      - name: Install explicit Apple Silicon desktop target
+        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'macOS') }}
+        run: rustup target add --toolchain 1.99.0 aarch64-apple-darwin
+      - name: Verify release inputs
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        run: python scripts/collect-release.py --check
+      - name: Install pinned Node.js for runtime dependency inventory
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.7.0
+          check-latest: false
+      - name: Provide exact LLVM native dependency reader
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $reader=Join-Path $env:ProgramFiles 'LLVM\bin\llvm-readobj.exe'
+          $exact=Test-Path -LiteralPath $reader
+          if ($exact) { $exact=(& $reader --version) -match 'LLVM version 20[.]1[.]8' }
+          if (-not $exact) {
+            choco install llvm --version=20.1.8 --force --yes --no-progress
+            if ($LASTEXITCODE) { throw 'Exact LLVM reader installation failed' }
+          }
+          $version=& $reader --version
+          if ($LASTEXITCODE -or -not ($version -match 'LLVM version 20[.]1[.]8')) { throw 'Required LLVM reader differs from its exact version' }
+          (Split-Path -Parent $reader) >> $env:GITHUB_PATH
+      - name: Restore exact source-built runtime inventory tools
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        id: inventory-tools
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        with:
+          path: ${{ runner.temp }}/inventory-tools
+          key: inventory-tools-v1-${{ runner.os }}-${{ runner.arch }}-rust-1.99.0-${{ hashFiles('scripts/ci-inventory-tools.py') }}
+      - name: Install or verify exact runtime inventory tools
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        env:
+          INVENTORY_CACHE_HIT: ${{ steps.inventory-tools.outputs.cache-hit == 'true' && 'true' || 'false' }}
+        shell: bash
+        run: python scripts/ci-inventory-tools.py --root "$RUNNER_TEMP/inventory-tools" --cache-hit "$INVENTORY_CACHE_HIT"
+      - name: Install native RPM readers
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Linux' }}
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y rpm rpm2cpio libarchive-tools
+      - name: Install exact WiX extraction tool
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
+        run: dotnet tool install --global wix --version 4.0.6
+      - name: Resolve Windows MSI version from Cargo metadata
+        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
+        id: xsoc_version
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed." }
+          $clientPackage = @($metadata.packages | Where-Object name -eq "xsoc")
+          if ($clientPackage.Count -ne 1) {
+              throw "cargo metadata did not contain exactly one xsoc package."
+          }
+          $version = $clientPackage[0].version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+              throw "Windows MSI requires a strict MAJOR.MINOR.PATCH Cargo version; found '$version'."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Build native Windows service and maintenance helper
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
         run: >-
           cargo build --locked --release -p xsoc --target x86_64-pc-windows-msvc
           --bin xsoc --bin xsoc-maintenance
-      - name: Validate installer defaults with release HTTPS policy
-        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
-        run: cargo test --locked --release -p xsoc --target x86_64-pc-windows-msvc --lib installer_default_is_valid_under_release_https_policy
       - name: Verify native Windows PE subsystems
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
         shell: powershell
@@ -231,10 +310,6 @@ jobs:
           $packages = @(Get-ChildItem packaging/windows/wix/bin/x64/Release -Filter '*.msi' -Recurse)
           if ($packages.Count -ne 1) { throw 'Expected exactly one native MSI' }
           .\packaging\windows\tests\Test-MsiLifecycle.ps1 -ProductVersion $env:XSOC_VERSION -ArtifactDirectory $packages[0].DirectoryName -LogDirectory "$env:RUNNER_TEMP\xsoc-msi-logs" -SmartmontoolsDirectory "$env:RUNNER_TEMP\xsoc-smartmontools\payload"
-      - name: Validate macOS packaging lifecycle
-        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'macOS') }}
-        shell: bash
-        run: sh packaging/macos/tests/validate-packaging.sh
       - name: Build native Linux executable
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Linux') }}
         run: cargo build --locked --release -p xsoc --bin xsoc
@@ -278,6 +353,33 @@ jobs:
           name: xsoc-${{ matrix.os }}
           path: release-dist/*
           if-no-files-found: error
+
+  # Preserve the existing required check names. Neither tests nor native package
+  # validation can turn green independently of the other matrix.
+  xsoc:
+    needs: [scope, desktop-checks, native-packages]
+    if: ${{ !cancelled() }}
+    name: Desktop xsoc (${{ matrix.os }})
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    # Matrix values preserve required check names; this only aggregates results.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all desktop checks and native packages
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          CHECKS_RESULT: ${{ needs.desktop-checks.result }}
+          PACKAGES_RESULT: ${{ needs.native-packages.result }}
+        run: |
+          test "$SCOPE_RESULT" = success
+          test "$CHECKS_RESULT" = success
+          test "$PACKAGES_RESULT" = success
 
   android-xsoc-library:
     needs: scope
