@@ -1,5 +1,7 @@
 # iOS / iPadOS 宿主集成 xsoc
 
+当前源码候选版本为 **1.0.6**，尚未发布。以下同版包名用于源码构建产物或后续正式发行；下载前核对对应 Release 已存在，旧版资产不包含本轮修复。
+
 本页面向开发 iPhone 和 iPad 原生应用的集成者。xsoc 提供宿主驱动的 Rust 报告构造库，当前 CI 检查 arm64 真机和 Apple Silicon 模拟器目标；仓库没有可安装的 IPA、Xcode 应用工程或现成 Swift 绑定。
 
 ## 检查 Rust 目标

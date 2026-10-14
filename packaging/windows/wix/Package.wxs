@@ -45,6 +45,9 @@
     <!-- Formatted only after costing; the WiX helper launches it with Explorer's normal token. -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="xsoc">
+        <?if $(var.IncludeInventory) = 1 ?>
+        <Directory Id="ReleaseInventoryDirectory" Name="share" />
+        <?endif?>
         <Directory Id="SMARTMONTOOLSDIRECTORY" Name="smartmontools">
           <Directory Id="SMARTMONTOOLS_BINDIRECTORY" Name="bin" />
         </Directory>
@@ -75,11 +78,6 @@
           Part="last"
           Permanent="no"
           System="yes" />
-
-        <!-- Remove only this product's registered legacy UI entries. -->
-        <RemoveRegistryValue Id="RemoveLegacyTrayRun" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="xsoc-tray" />
-        <RemoveFile Id="RemoveLegacyTrayFile" Name="xsoc-tray.exe" On="install" />
-        <RemoveFile Id="RemoveLegacyTrayShortcut" Directory="ProgramMenuFolder" Name="xsoc.lnk" On="install" />
 
         <ServiceInstall
           Id="XsocServiceInstall"
@@ -161,6 +159,9 @@
       <ComponentRef Id="ClientStateDirectoryComponent" />
       <ComponentRef Id="SmartmontoolsRuntimeComponent" />
       <ComponentRef Id="SmartmontoolsComplianceComponent" />
+      <?if $(var.IncludeInventory) = 1 ?>
+      <ComponentGroupRef Id="ReleaseInventoryFiles" />
+      <?endif?>
     </Feature>
 
 

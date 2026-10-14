@@ -141,6 +141,16 @@ grep -F '"state_dir": "/Library/Application Support/xsoc"' \
 chmod 0644 "$root/usr/local/share/xsoc/xsoc.json.example"
 
 component="$packages/xsoc-component.pkg"
+mkdir -p "$root/installer-scripts/macos"
+for script in preinstall postinstall; do
+  install -m 0755 "$package_scripts/$script" "$root/installer-scripts/macos/$script"
+done
+python3 "$repository_root/scripts/prepare-native-inventory.py" --stage "$root" \
+  --version "$VERSION" --target aarch64-apple-darwin
+mkdir -p "$repository_root/dist/native-inventory"
+cp "$root/usr/local/share/xsoc/release-sbom.cdx.json" \
+  "$repository_root/dist/native-inventory/macos-inner.cdx.json"
+rm -rf "$root/installer-scripts"
 pkgbuild --root "$root" --scripts "$package_scripts" --ownership recommended \
   --identifier org.sarmg.xsoc --version "$VERSION" --install-location / \
   "$component"

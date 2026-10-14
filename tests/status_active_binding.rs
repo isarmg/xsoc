@@ -81,7 +81,7 @@ impl Fixture {
         let output = Command::new(env!("CARGO_BIN_EXE_xsoc"))
             .args([
                 "status",
-                "--output",
+                "--format",
                 "json",
                 "--config",
                 self.config_path.to_str().unwrap(),
@@ -187,7 +187,7 @@ fn pair_status_returns_actionable_error_for_incompatible_account_state() {
         .args([
             "pair",
             "status",
-            "--output",
+            "--format",
             "json",
             "--config",
             fixture.config_path.to_str().unwrap(),
@@ -224,7 +224,7 @@ fn incompatible_spool_blocks_account_recovery_before_any_archive() {
             "recover",
             "--input-stdin",
             "--non-interactive",
-            "--output",
+            "--format",
             "json",
             "--config",
             fixture.config_path.to_str().unwrap(),

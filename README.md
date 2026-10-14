@@ -1,5 +1,7 @@
 # xsoc
 
+当前源码候选版本为 **1.0.6**，尚未发布。以下同版包名用于源码构建产物或后续正式发行；下载前核对对应 Release 已存在，旧版资产不包含本轮修复。
+
 xsoc 是 xsos 的只读主机监控客户端，主动通过 HTTPS 上报遥测，并在断网时使用有界本地队列重试。
 
 ## 项目功能
@@ -14,14 +16,14 @@ Windows 11 x64、Linux x86_64（systemd，提供 DEB/RPM）和 macOS Apple Silic
 
 ## 快速部署
 
-以下包名按 1.0.5 发布准备；正式下载以发布页已经完成验证的资产为准。
+以下包名按 1.0.6 发布准备；正式下载以发布页已经完成验证的资产为准。
 
 从 [Release](https://github.com/isarmg/xsoc/releases) 下载本机平台的安装包及对应 `SHA256SUMS-*`，核对 SHA-256 后安装。准备 xsos 管理员提供的 HTTPS 地址与实例授权码。
 
-Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.5.x86_64.rpm`）：
+Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.6.x86_64.rpm`）：
 
 ```sh
-sudo apt install ./xsoc_1.0.5_amd64.deb
+sudo apt install ./xsoc_1.0.6_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json
@@ -30,13 +32,13 @@ sudo xsoc status --check --format json
 macOS Apple Silicon：
 
 ```sh
-sudo installer -pkg ./xsoc-1.0.5-macos-arm64-unsigned.pkg -target /
+sudo installer -pkg ./xsoc-1.0.6-macos-arm64-unsigned.pkg -target /
 sudo /usr/local/bin/xsoc service stop
 sudo /usr/local/bin/xsoc setup --interactive
 sudo /usr/local/bin/xsoc status --check --format json
 ```
 
-Windows：运行 `xsoc-1.0.5-x64.msi` 完成安装，再打开新的管理员 PowerShell：
+Windows：运行 `xsoc-1.0.6-x64.msi` 完成安装，再打开新的管理员 PowerShell：
 
 ```powershell
 xsoc service stop
@@ -44,7 +46,7 @@ xsoc setup --interactive
 xsoc status --check --format json
 ```
 
-向导完成配对、设置开机自启（默认 Yes）、启动服务并验证连接。最后到 xsos 管理页确认主机收到新报告。授权码会在终端明文回显，请使用受保护终端；不要将秘密放进命令参数。macOS 包未签名、未公证，校验后按系统批准流程安装。
+向导完成配对、设置开机自启（默认 Yes）、启动服务并验证连接。最后到 xsos 管理页确认主机收到新报告。授权码使用隐藏输入，请使用受保护终端；不要将秘密放进命令参数。macOS 包未签名、未公证，校验后按系统批准流程安装。
 
 ## 编译部署
 
@@ -55,7 +57,7 @@ git clone https://github.com/isarmg/xsoc.git
 cd xsoc
 XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --bin xsoc
 sh packaging/linux/build-packages.sh
-sudo apt install ./dist/xsoc_1.0.5_amd64.deb
+sudo apt install ./dist/xsoc_1.0.6_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json

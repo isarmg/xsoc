@@ -421,6 +421,10 @@ pub(super) fn print_local_status(config: &ClientConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("one or more read-only diagnostic checks failed")]
+pub(crate) struct RenderedDiagnosticFailure;
+
 pub(super) async fn run_read_only_doctor(config: &ClientConfig) -> anyhow::Result<()> {
     let mut checks = Vec::new();
     checks.push(inspect_tls(config));
@@ -519,7 +523,7 @@ pub(super) async fn run_read_only_doctor(config: &ClientConfig) -> anyhow::Resul
             "local snapshot completed with {capabilities} capabilities and {collector_errors} collector errors"
         ),
         (collector_errors != 0)
-            .then_some("inspect capability details with `xsoc probe --output json`"),
+            .then_some("inspect capability details with `xsoc probe --format json`"),
         started,
     ));
     checks.push(DiagnosticCheck::new(
@@ -556,6 +560,7 @@ pub(super) async fn run_read_only_doctor(config: &ClientConfig) -> anyhow::Resul
     });
     match config.output_mode {
         OutputMode::Json => println!("{}", serde_json::to_string_pretty(&result)?),
+        OutputMode::Ndjson => println!("{}", serde_json::to_string(&result)?),
         OutputMode::Human => {
             println!("xsoc doctor: {status} (read-only)");
             for check in &checks {
@@ -567,7 +572,7 @@ pub(super) async fn run_read_only_doctor(config: &ClientConfig) -> anyhow::Resul
         }
     }
     if has_errors {
-        anyhow::bail!("one or more read-only diagnostic checks failed");
+        return Err(RenderedDiagnosticFailure.into());
     }
     Ok(())
 }

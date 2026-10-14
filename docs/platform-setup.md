@@ -1,5 +1,7 @@
 # xsoc 平台安装入口
 
+当前源码候选版本为 **1.0.6**，尚未发布。以下同版包名用于源码构建产物或后续正式发行；下载前核对对应 Release 已存在，旧版资产不包含本轮修复。
+
 按主机平台打开对应指南。每页集中说明该平台的安装、源码构建、日志、常见问题和卸载；通用向导输入与完成结果在本页下方。
 
 ## Linux
@@ -25,13 +27,13 @@
 
 准备 [xsos 管理员](https://github.com/isarmg/xsos/blob/main/docs/instance-management.md)提供的 HTTPS 根地址和实例授权码，使用管理员终端完成安装与设置。
 
-下载入口：[Release](https://github.com/isarmg/xsoc/releases)。各平台指南的包名按 1.0.5 发布准备；下载时以已经完成验证的正式资产为准。安装前核对摘要；已发布包的源码身份以对应 manifest 和 `version` 输出为准。
+下载入口：[Release](https://github.com/isarmg/xsoc/releases)。各平台指南的包名按 1.0.6 发布准备；下载时以已经完成验证的正式资产为准。安装前核对摘要；已发布包的源码身份以对应 manifest 和 `version` 输出为准。
 
 ## 向导输入与完成结果
 
 向导依次询问服务端 HTTPS 根地址和实例授权码。首次设置会创建缺少的配置，随后询问开机自启（默认 Yes），启动服务并验证连接。
 
-授权码在终端中明文回显，请在受保护终端输入。将 HTTPS 地址填为根地址，例如 `https://monitor.example.com`。远程证书应被服务账户的系统信任库信任且匹配域名。
+授权码在终端中隐藏输入，请在受保护终端输入。将 HTTPS 地址填为根地址，例如 `https://monitor.example.com`。远程证书应被服务账户的系统信任库信任且匹配域名。
 
 成功后到 xsos 管理台确认该主机收到新报告。配对中断时先查看 `xsoc pair status --format json`，再用 `pair resume` 继续现有事务。
 

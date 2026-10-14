@@ -94,6 +94,7 @@ pub enum ClientCommand {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum OutputMode {
     Json,
+    Ndjson,
     #[default]
     Human,
 }
@@ -263,26 +264,22 @@ impl ClientConfig {
                     }
                     replace_pending_pairing = true;
                 }
-                "--output" => {
+                "--format" => {
                     if output_mode_selected {
-                        bail!("--output may be specified only once");
+                        bail!("--format may be specified only once");
                     }
                     output_mode = match args
                         .next()
-                        .context("--output requires human or json")?
+                        .context("--format requires human, json or ndjson")?
                         .as_str()
                     {
                         "human" => OutputMode::Human,
                         "json" => OutputMode::Json,
-                        other => bail!("unsupported output format {other}; use human or json"),
+                        "ndjson" => OutputMode::Ndjson,
+                        other => {
+                            bail!("unsupported output format {other}; use human, json or ndjson")
+                        }
                     };
-                    output_mode_selected = true;
-                }
-                "--json" => {
-                    if output_mode_selected {
-                        bail!("--json conflicts with an earlier output option");
-                    }
-                    output_mode = OutputMode::Json;
                     output_mode_selected = true;
                 }
                 "--delivery" => {
@@ -810,7 +807,7 @@ fn print_help() {
          status print local identity, authorization, pairing, and spool state\n\
          Pairing example:\n\
            xsoc pair --server https://xsos.example.com\n\n\
-         Common options: --config PATH [--endpoint REPORT_URL] [--output human|json]\n\
+         Common options: --config PATH [--endpoint REPORT_URL] [--format human|json|ndjson]\n\
          Delivery requires HTTPS.\n\
          Doctor delivery opt-in: --delivery (sends one report and may drain queued reports)\n\
          Pair options: [--server URL | --endpoint REPORT_URL]\n\

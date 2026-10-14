@@ -34,14 +34,10 @@ if not "%DETECTED_CLIENT_VERSION%"=="xsoc %PRODUCT_VERSION%" (
   exit /b 2
 )
 
-rem The project repeats the exact binary/version check so direct MSBuild callers cannot bypass it.
-dotnet build "%SCRIPT_ROOT%Xsoc.Installer.wixproj" ^
-  --configuration Release ^
-  --nologo ^
-  -p:ProductVersion="%PRODUCT_VERSION%" ^
-  -p:ClientExe="%CLIENT_EXE%" ^
-  -p:MaintenanceExe="%MAINTENANCE_EXE%" ^
-  -p:SmartmontoolsDir="%SMARTMONTOOLS_DIR%"
+rem The project repeats the exact binary/version checks for each build.
+powershell.exe -NoProfile -File "%SCRIPT_ROOT%build-reviewed-msi.ps1" ^
+  -Version "%PRODUCT_VERSION%" -ClientExe "%CLIENT_EXE%" ^
+  -MaintenanceExe "%MAINTENANCE_EXE%" -SmartmontoolsDir "%SMARTMONTOOLS_DIR%"
 if errorlevel 1 exit /b %errorlevel%
 
 echo MSI created below "%SCRIPT_ROOT%bin\x64\Release".

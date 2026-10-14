@@ -468,9 +468,8 @@ Assert-Contains $projectText 'ConsoleToMSBuild="true"' `
     "The WiX project must execute ClientExe to bind the MSI version to its binary."
 Assert-Contains $projectText "'`$(DetectedClientVersion)' != 'xsoc `$(ProductVersion)'" `
     "Direct MSBuild callers must fail when ProductVersion differs from ClientExe --version."
-if ($buildText -match '(?i)powershell(?:\.exe)?|pwsh(?:\.exe)?') {
-    throw "The MSI build entrypoint must not require PowerShell."
-}
+Assert-Contains $buildText 'build-reviewed-msi.ps1' `
+    "The MSI entrypoint must build and verify the actual runtime inventory."
 Assert-Contains $buildText '"%CLIENT_EXE%" --version' `
     "The command-line MSI build entrypoint must read the Client binary version."
 Assert-Contains $buildText 'xsoc %PRODUCT_VERSION%' `
@@ -493,12 +492,9 @@ if ($buildText.Contains('1.2.3')) {
 if ($packageText -match 'TrayExe|ClientTrayComponent|WixUnelevatedShellExec|LaunchClientTray|<Shortcut ') {
     throw "Removed UI payload or interactive entry remains in MSI."
 }
-$legacyRun = Select-One "//w:RemoveRegistryValue[@Id='RemoveLegacyTrayRun']"
-Assert-Equal $legacyRun.Name "xsoc-tray" "Legacy cleanup must name only this product's Run entry."
-Assert-Equal $legacyRun.Root "HKLM" "Legacy Run cleanup must use the installed hive."
-$legacyFile = Select-One "//w:RemoveFile[@Id='RemoveLegacyTrayFile']"
-Assert-Equal $legacyFile.Name "xsoc-tray.exe" "Legacy cleanup must not use wildcard paths."
-Assert-Equal $legacyFile.On "install" "Legacy UI cleanup belongs to installation."
+if ($packageText -match 'RemoveLegacyTrayRun|RemoveLegacyTrayFile|RemoveLegacyTrayShortcut') {
+    throw 'Current-only installer must not retain deleted tray compatibility actions.'
+}
 
 # A live producer holds the reader gate with FILE_SHARE_READ. The fixture must
 # request only read access while still taking an exclusive byte-range lock.

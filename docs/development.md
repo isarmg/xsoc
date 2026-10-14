@@ -22,13 +22,17 @@ python3 scripts/check-workflow-supply-chain.py
 - [Android 宿主库检查](platforms/android.md#检查-rust-目标)
 - [iOS / iPadOS 宿主库检查](platforms/ios.md#检查-rust-目标)
 
+正式打包从 `build-tools-source.json` 固定的 `xssi` 提交取得公共物料工具，只接受当前干净源码。工具按实际目标与 feature 生成 Cargo 运行依赖图，并将随包 smartmontools、原始许可、安装脚本和最终文件清单一并核验。Windows 还核对最终 MSI 的服务、注册表、环境变量及自定义动作与本次 WXS 源码一致；DEB、RPM、PKG 使用平台格式工具只读展开核验。
+
+最终交付目录包含可与原生安装包互相核对的 SBOM、`share/package.json` 和 `share/package.sha256`。发行校验使用 SHA-256；实际 MSI/PKG 是否具有平台签名按资产说明判断。构建工具修订未固定时打包会明确失败，不能把开发夹具当作发行物料。
+
 ## 仓库与运行边界
 
 本仓库只有一个实际 Rust 包：根 `Cargo.toml`/`Cargo.lock` 约束依赖图，`src/` 保存采集、平台服务、状态与 CLI，`tests/` 保存独立行为和传输验证。协议是独立产品的固定 Git 输入，`packaging/` 保存系统安装器与维护夹具，`scripts/` 保存构建、发行检查，`docs/` 描述当前操作和合同。大型平台模块按职责拆分，模块测试就近保存。
 
 当前使用 xcsc 的私有状态、CLI、有界进程和持久服务日志能力。正常运行只接受当前配置与账户格式；异常状态保全后明确报错。依赖选择和原生边界见[依赖与 unsafe 审查](unsafe-audit.md)，具体公共接口见[公共支撑](common-support.md)。
 
-客户端不提供托盘或本地网页；移动宿主库接口见[移动宿主合同](mobile-host.md)。配置候选文件、轮换、队列和诊断见[配置指南](configuration.md)。不要把授权码、客户端令牌或 OTLP 令牌写入命令参数、Shell 历史或日志；交互授权码会明文回显，应使用受保护终端。
+客户端不提供托盘或本地网页；移动宿主库接口见[移动宿主合同](mobile-host.md)。配置候选文件、轮换、队列和诊断见[配置指南](configuration.md)。不要把授权码、客户端令牌或 OTLP 令牌写入命令参数、Shell 历史或日志；交互授权码使用隐藏输入，应使用受保护终端。
 
 代码采用 [Apache License 2.0](../LICENSE-APACHE)。
 

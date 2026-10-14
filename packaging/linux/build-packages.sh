@@ -45,10 +45,12 @@ case "$package_arch" in
   amd64)
     expected_elf_machine='Advanced Micro Devices X86-64'
     rpm_arch=x86_64
+    runtime_target=x86_64-unknown-linux-gnu
     ;;
   arm64)
     expected_elf_machine=AArch64
     rpm_arch=aarch64
+    runtime_target=aarch64-unknown-linux-gnu
     ;;
   *) die "unsupported Client Linux package architecture: $package_arch" ;;
 esac
@@ -93,6 +95,7 @@ command -v "$nfpm_bin" >/dev/null 2>&1 || [ -x "$nfpm_bin" ] ||
   die "nFPM is unavailable: $nfpm_bin"
 
 mkdir -p dist
+python3 scripts/prepare-linux-payload.py --version "$package_version" --target "$runtime_target"
 VERSION="$package_version" NFPM_ARCH="$package_arch" "$nfpm_bin" package \
   --config packaging/nfpm.yaml --packager deb \
   --target "dist/xsoc_${package_version}_${package_arch}.deb"

@@ -89,18 +89,26 @@ fn build_runtime() -> anyhow::Result<tokio::runtime::Runtime> {
 #[cfg(windows)]
 async fn run_client(ready: Option<fn() -> anyhow::Result<bool>>) -> anyhow::Result<()> {
     let (config, command) = ClientConfig::load_from_args().context("service configuration")?;
-    execute_config(config, command, ready).await
+    execute_config(config, command, ready).await.map(|_| ())
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CollectorOutcome {
+    OutputWritten,
+    Stopped,
+}
+
 pub(crate) async fn execute_config(
     mut config: ClientConfig,
     command: ClientCommand,
     ready: Option<fn() -> anyhow::Result<bool>>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<CollectorOutcome> {
     if command == ClientCommand::Status {
-        return print_local_status(&config);
+        return print_local_status(&config).map(|_| CollectorOutcome::OutputWritten);
     }
     if command == ClientCommand::Doctor && !config.doctor_delivery {
-        return run_read_only_doctor(&config).await;
+        return run_read_only_doctor(&config)
+            .await
+            .map(|_| CollectorOutcome::OutputWritten);
     }
     let _maintenance = if matches!(
         command,
@@ -135,7 +143,7 @@ pub(crate) async fn execute_config(
         transient_host_identity(Uuid::new_v4())
     };
     if shutdown.is_requested() {
-        return Ok(());
+        return Ok(CollectorOutcome::Stopped);
     }
     if command == ClientCommand::Pair {
         anyhow::bail!("use the public CLI pairing entry");
@@ -156,7 +164,7 @@ pub(crate) async fn execute_config(
     let mut sampler = SystemSampler::with_smart_config(config.smart.clone());
     tokio::select! {
         biased;
-        _ = shutdown.cancelled() => return Ok(()),
+        _ = shutdown.cancelled() => return Ok(CollectorOutcome::Stopped),
         _ = tokio::time::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL) => {}
     }
 
@@ -171,7 +179,7 @@ pub(crate) async fn execute_config(
         {
             tokio::select! {
                 biased;
-                _ = shutdown.cancelled() => return Ok(()),
+                _ = shutdown.cancelled() => return Ok(CollectorOutcome::Stopped),
                 _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
             }
         }
@@ -180,10 +188,11 @@ pub(crate) async fn execute_config(
     if command == ClientCommand::Probe {
         let report = sampler.collect(host, config.slow_interval_seconds, 0);
         if shutdown.is_requested() {
-            return Ok(());
+            return Ok(CollectorOutcome::Stopped);
         }
         match config.output_mode {
             OutputMode::Json => println!("{}", serde_json::to_string_pretty(&report)?),
+            OutputMode::Ndjson => println!("{}", serde_json::to_string(&report)?),
             OutputMode::Human => println!(
                 "Local collection succeeded: {} logical CPUs, {} network interfaces, {} disks, {} capabilities ({} collector errors).",
                 report.system.cpu.logical_count,
@@ -193,7 +202,7 @@ pub(crate) async fn execute_config(
                 report.client.collector_errors
             ),
         }
-        return Ok(());
+        return Ok(CollectorOutcome::OutputWritten);
     }
 
     let spool = Spool::from_session(
@@ -208,11 +217,11 @@ pub(crate) async fn execute_config(
     if let Some(report_ready) = ready
         && !report_ready()?
     {
-        return Ok(());
+        return Ok(CollectorOutcome::Stopped);
     }
     let Some(reporter) = prepare_reporter(&mut config, &mut host, command, &shutdown).await? else {
         info!("shutdown signal received while waiting for browser pairing");
-        return Ok(());
+        return Ok(CollectorOutcome::Stopped);
     };
 
     if matches!(command, ClientCommand::Once | ClientCommand::Doctor) {
@@ -227,7 +236,7 @@ pub(crate) async fn execute_config(
         .await?;
         if outcome == delivery::RunOnceOutcome::Shutdown {
             info!("shutdown signal received during one-shot delivery");
-            return Ok(());
+            return Ok(CollectorOutcome::Stopped);
         }
         if command == ClientCommand::Doctor {
             let delivery = serde_json::json!({
@@ -251,31 +260,33 @@ pub(crate) async fn execute_config(
                 OutputMode::Json => {
                     println!("{}", serde_json::to_string_pretty(&delivery)?)
                 }
+                OutputMode::Ndjson => println!("{}", serde_json::to_string(&delivery)?),
                 OutputMode::Human => println!(
                     "xsoc doctor: healthy; end-to-end delivery succeeded and the spool is drained."
                 ),
             }
-            return Ok(());
+            return Ok(CollectorOutcome::OutputWritten);
         }
+        let delivered = serde_json::json!({
+            "schema_version": 1,
+            "command": "once",
+            "status": "delivered",
+            "host_id": host.id,
+            "spool_pending_batches": spool.pending_count()?
+        });
         match config.output_mode {
-            OutputMode::Json => println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "schema_version": 1,
-                    "command": "once",
-                    "status": "delivered",
-                    "host_id": host.id,
-                    "spool_pending_batches": spool.pending_count()?
-                }))?
-            ),
+            OutputMode::Json => println!("{}", serde_json::to_string_pretty(&delivered)?),
+            OutputMode::Ndjson => println!("{}", serde_json::to_string(&delivered)?),
             OutputMode::Human => println!("One telemetry snapshot was delivered successfully."),
         }
-        return Ok(());
+        return Ok(CollectorOutcome::OutputWritten);
     }
 
     info!(event = "xsoc.collection.started", instance_id = %host.id, instance_type = "host", "read-only telemetry client started");
     verify_logging()?;
-    run_loop(config, host, sampler, spool, reporter, &shutdown).await
+    run_loop(config, host, sampler, spool, reporter, &shutdown)
+        .await
+        .map(|_| CollectorOutcome::Stopped)
 }
 
 pub(crate) mod diagnostics;

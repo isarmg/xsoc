@@ -1423,9 +1423,9 @@ Run setup separately from the installer with:
 
 After setup, inspect local state with:
 
-  sudo /usr/local/bin/xsoc status --output human \
+  sudo /usr/local/bin/xsoc status --format human \
     --config '/Library/Application Support/xsoc/config.json'
-  sudo /usr/local/bin/xsoc doctor --output human \
+  sudo /usr/local/bin/xsoc doctor --format human \
     --config '/Library/Application Support/xsoc/config.json'
 
 Inspect the LaunchDaemon and its private log:

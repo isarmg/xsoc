@@ -39,28 +39,40 @@ overrides:
 #   cargo build --release -p xsoc --target aarch64-unknown-linux-gnu
 #   install -Dm755 target/aarch64-unknown-linux-gnu/release/xsoc target/release/xsoc
 contents:
-  - src: ./target/release/xsoc
+  - src: ./dist/native-payload/usr/bin/xsoc
     dst: /usr/bin/xsoc
     file_info:
       mode: 0755
-  - src: ./config/xsoc.json.example
+  - src: ./dist/native-payload/etc/xsoc/config.json
     dst: /etc/xsoc/config.json
     type: config|noreplace
     file_info:
       mode: 0600
-  - src: ./packaging/linux/xsoc.service
+  - src: ./dist/native-payload/usr/lib/systemd/system/xsoc.service
     dst: /usr/lib/systemd/system/xsoc.service
   # GPU drop-in: default builds enable the nvidia feature, but PrivateDevices=yes hides
   # /dev/nvidia*, which NVML requires. This file must be bundled with the package; leaving it only
   # in the source tree leaves deb/rpm users unable to enable GPU collection.
   # postinstall explains how to enable it.
-  - src: ./packaging/linux/xsoc-gpu.conf
+  - src: ./dist/native-payload/usr/share/xsoc/xsoc-gpu.conf
     dst: /usr/share/xsoc/xsoc-gpu.conf
-  - src: ./packaging/linux/purge-local-state.sh
+  - src: ./dist/native-payload/usr/sbin/xsoc-purge
     dst: /usr/sbin/xsoc-purge
     file_info:
       mode: 0755
+  - src: ./dist/native-payload/usr/share/doc/xsoc/runtime-sbom.cdx.json
+    dst: /usr/share/doc/xsoc/runtime-sbom.cdx.json
+    file_info:
+      mode: 0644
+  - src: ./dist/native-payload/usr/share/doc/xsoc/release-sbom.cdx.json
+    dst: /usr/share/doc/xsoc/release-sbom.cdx.json
+    file_info:
+      mode: 0644
+  - src: ./dist/native-payload/usr/share/doc/xsoc/THIRD_PARTY_RUNTIME_LICENSES.txt
+    dst: /usr/share/doc/xsoc/THIRD_PARTY_RUNTIME_LICENSES.txt
+    file_info:
+      mode: 0644
 scripts:
-  postinstall: ./packaging/linux/postinstall.sh
-  preremove: ./packaging/linux/preremove.sh
-  postremove: ./packaging/linux/postremove.sh
+  postinstall: ./dist/native-payload/installer-scripts/postinstall.sh
+  preremove: ./dist/native-payload/installer-scripts/preremove.sh
+  postremove: ./dist/native-payload/installer-scripts/postremove.sh

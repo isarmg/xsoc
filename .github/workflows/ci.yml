@@ -102,6 +102,39 @@ jobs:
       - name: Verify release inputs
         if: ${{ needs.scope.outputs.run_full != 'false' }}
         run: python scripts/collect-release.py --check
+      - name: Install pinned Node.js for runtime dependency inventory
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.7.0
+          check-latest: false
+      - name: Provide exact LLVM native dependency reader
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $reader=Join-Path $env:ProgramFiles 'LLVM\bin\llvm-readobj.exe'
+          $exact=Test-Path -LiteralPath $reader
+          if ($exact) { $exact=(& $reader --version) -match 'LLVM version 20[.]1[.]8' }
+          if (-not $exact) {
+            choco install llvm --version=20.1.8 --force --yes --no-progress
+            if ($LASTEXITCODE) { throw 'Exact LLVM reader installation failed' }
+          }
+          $version=& $reader --version
+          if ($LASTEXITCODE -or -not ($version -match 'LLVM version 20[.]1[.]8')) { throw 'Required LLVM reader differs from its exact version' }
+          (Split-Path -Parent $reader) >> $env:GITHUB_PATH
+      - name: Install exact runtime inventory tools
+        if: ${{ needs.scope.outputs.run_full != 'false' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo install --locked cargo-cyclonedx --version 0.5.9
+      - name: Install native RPM readers
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Linux' }}
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y rpm rpm2cpio libarchive-tools
+      - name: Install exact WiX extraction tool
+        if: ${{ needs.scope.outputs.run_full != 'false' && runner.os == 'Windows' }}
+        run: dotnet tool install --global wix --version 4.0.6
       - name: Resolve Windows MSI version from Cargo metadata
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Windows') }}
         id: xsoc_version
@@ -136,12 +169,6 @@ jobs:
         timeout-minutes: 10
         # Show failures before a later network fixture can block suite completion.
         run: cargo test --locked -p xsoc -- --test-threads=1 --nocapture
-      - name: Install pinned Node.js for the Server contract fixture
-        if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Linux') }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 26.7.0
-          check-latest: false
       - name: Validate current pairing JSON against latest Server
         if: ${{ needs.scope.outputs.run_full != 'false' && (runner.os == 'Linux') }}
         run: |

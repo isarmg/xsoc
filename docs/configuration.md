@@ -130,7 +130,7 @@ sudo xsoc pair --interactive
 sudo xsoc pair status --format json
 ```
 
-授权码在交互终端明文回显；请在受保护终端输入，自动化使用下述受保护 stdin。
+授权码在交互终端隐藏输入；请在受保护终端输入，自动化使用下述受保护 stdin。
 
 自动化必须通过 stdin 提交严格 JSON：
 

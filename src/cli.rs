@@ -22,6 +22,9 @@ impl ProductErrorCatalog for XsocErrorCatalog {
     fn message(&self, code: &'static str) -> Option<&'static str> {
         match code {
             "awaiting_pairing" => Some("xsoc has not completed xsos pairing."),
+            "operation_cancelled" => Some(
+                "The collection or delivery command stopped before producing a completed result.",
+            ),
             "active_setup_input_requires_pair_replace"
             | "binding_already_active_use_pair_replace" => Some(
                 "This xsoc instance is already bound; replacing it requires the explicit pair replace workflow.",
@@ -428,11 +431,11 @@ async fn pair(args: &Args, mut c: ClientConfig) -> Result<Value> {
             } else {
                 prompt_text("Server origin", MAX_SERVER_ORIGIN_BYTES, deadline)?
             },
-            authorization_code: Zeroizing::new(prompt_text(
-                "Authorization code (visible)",
+            authorization_code: prompt_secret(
+                "Authorization code",
                 MAX_AUTHORIZATION_CODE_BYTES,
                 deadline,
-            )?),
+            )?,
         })
     } else {
         return Err(fail(2, "protected_input_required"));
@@ -1478,12 +1481,12 @@ pub fn entry(raw: Vec<String>) -> u8 {
     // Collector commands write their own single result and exit status.
     if result
         .as_ref()
-        .is_ok_and(|v| v.get("legacy_output") == Some(&Value::Bool(true)))
+        .is_ok_and(|v| v.get("output_written") == Some(&Value::Bool(true)))
     {
         return result
             .as_ref()
             .ok()
-            .and_then(|v| v["legacy_exit"].as_u64())
+            .and_then(|v| v["exit_code"].as_u64())
             .unwrap_or(0) as u8;
     }
     let exit = emit_host(&command, &args.format, &result);
@@ -1703,7 +1706,7 @@ fn execute(args: &Args) -> Result<Value> {
         }
         ["status"] | ["pair", "status"] | ["queue", "status"] | ["queue", "inspect"] => {
             args.validate_options(&["--watch", "--check"])?;
-            let mut selected = vec!["status".into(), "--output".into(), "json".into()];
+            let mut selected = vec!["status".into(), "--format".into(), "json".into()];
             if config_exists(&path)? || args.has("--config") {
                 selected.extend(["--config".into(), path.to_string_lossy().into_owned()]);
             }
@@ -1782,15 +1785,7 @@ fn execute(args: &Args) -> Result<Value> {
             if config_exists(&path)? || args.has("--config") {
                 normalized.extend(["--config".into(), path.to_string_lossy().into_owned()]);
             }
-            normalized.extend([
-                "--output".into(),
-                if args.format == "human" {
-                    "human"
-                } else {
-                    "json"
-                }
-                .into(),
-            ]);
+            normalized.extend(["--format".into(), args.format.clone()]);
             if args.has("--delivery") {
                 normalized.push("--delivery".into());
             }
@@ -1803,13 +1798,19 @@ fn execute(args: &Args) -> Result<Value> {
                     cmd,
                     crate::monitor_app::platform_ready_callback(),
                 ));
-            if cmd == ClientCommand::Doctor && !args.has("--delivery") {
-                return Ok(
-                    json!({"legacy_output":true,"legacy_exit":if runtime_result.is_ok(){0}else{12}}),
-                );
+            if cmd == ClientCommand::Doctor
+                && !args.has("--delivery")
+                && runtime_result.as_ref().err().is_some_and(|error| {
+                    error.is::<crate::monitor_app::diagnostics::RenderedDiagnosticFailure>()
+                })
+            {
+                return Ok(json!({"output_written":true,"exit_code":12}));
             }
-            runtime_result.map_err(runtime_error)?;
-            Ok(json!({"legacy_output":true}))
+            match runtime_result.map_err(runtime_error)? {
+                crate::monitor_app::CollectorOutcome::OutputWritten => Ok(json!({"output_written":true})),
+                crate::monitor_app::CollectorOutcome::Stopped if cmd == ClientCommand::Run => Ok(json!({"stopped":true})),
+                crate::monitor_app::CollectorOutcome::Stopped => Err(fail(9,"operation_cancelled").with_detail("No completed result was emitted; retained queued reports require normal delivery confirmation.")),
+            }
         }
         _ => Err(fail(2, "unknown_command")),
     }

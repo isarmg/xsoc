@@ -141,7 +141,7 @@ fn service_main_inner() -> anyhow::Result<()> {
     // Process-lifetime log handles are released only when this process exits.
     drop(runtime);
     match result {
-        Ok(()) => {
+        Ok(_) => {
             xcsc::log::LogRecord::client(
                 "xsoc",
                 "windows-service",

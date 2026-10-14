@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,12 +50,18 @@ def main():
     system = platform.system()
     if system == "Windows":
         assets = list(Path("packaging/windows/wix/bin/x64/Release").rglob(f"xsoc-{version}-x64.msi"))
+        target = 'x86_64-pc-windows-msvc'
+        inner = Path('dist/native-inventory/windows-inner.cdx.json')
         expected = 1
     elif system == "Linux":
         assets = [Path(f"dist/xsoc_{version}_amd64.deb"), Path(f"dist/xsoc-{version}.x86_64.rpm")]
+        target = 'x86_64-unknown-linux-gnu'
+        inner = Path('dist/native-inventory/linux-inner.cdx.json')
         expected = 2
     elif system == "Darwin":
         assets = [Path(f"dist/xsoc-{version}-macos-{platform.machine()}-unsigned.pkg")]
+        target = 'aarch64-apple-darwin'
+        inner = Path('dist/native-inventory/macos-inner.cdx.json')
         expected = 1
     else:
         raise ValueError(f"unsupported platform: {system}")
@@ -66,6 +73,16 @@ def main():
     for asset in assets:
         shutil.copy2(asset, output / asset.name)
         files[asset.name] = hashlib.sha256(asset.read_bytes()).hexdigest()
+    delivery = output / f'xsoc-{version}-{target}-native-delivery.tar.gz'
+    with tempfile.TemporaryDirectory(prefix='xsoc-final-native-') as temporary:
+        arguments = [sys.executable, str(ROOT / 'scripts/package-native-delivery.py'),
+                     '--stage', str(Path(temporary) / 'delivery'), '--target', target,
+                     '--output', str(delivery.resolve())]
+        for asset in assets:
+            arguments.extend(['--artifact', str(asset.resolve()), '--inner-bom', str(inner.resolve())])
+        subprocess.run(arguments, check=True)
+    for path in (delivery, delivery.with_name(delivery.name + '.sha256')):
+        files[path.name] = hashlib.sha256(path.read_bytes()).hexdigest()
     manifest = {"version": version, "commit": commit, "os": system, "arch": platform.machine(), "sha256": files,
                 "signing": "unsigned (no Authenticode/Developer ID/notarization)",
                 "ci_run": os.environ.get("GITHUB_RUN_ID")}

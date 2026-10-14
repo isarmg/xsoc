@@ -6,7 +6,7 @@ packaging_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
 test_root=$(mktemp -d "${TMPDIR:-/tmp}/xsoc-package-builder-test.XXXXXX")
 fixture_root=$test_root/repository
 mock_bin=$test_root/bin
-package_version=1.0.5
+package_version=1.0.6
 execution_marker=$test_root/payload-executed
 nfpm_log=$test_root/nfpm.log
 builder_output=$test_root/builder.output
@@ -43,10 +43,18 @@ mkdir -p \
   "$fixture_root/packaging/linux" \
   "$fixture_root/config" \
   "$fixture_root/target/release" \
+  "$fixture_root/scripts" \
   "$mock_bin"
 cp "$packaging_dir/build-packages.sh" \
   "$fixture_root/packaging/linux/build-packages.sh"
 cp "$packaging_dir/../nfpm.yaml" "$fixture_root/packaging/nfpm.yaml"
+cat >"$fixture_root/scripts/prepare-linux-payload.py" <<'PY'
+# The builder tests model native inventory production independently of Cargo;
+# final package extraction is verified by the real release receipt tests.
+import argparse
+p=argparse.ArgumentParser();p.add_argument('--version',required=True);p.add_argument('--target',required=True)
+p.parse_args()
+PY
 for lifecycle_script in postinstall.sh preremove.sh postremove.sh purge-local-state.sh; do
   printf 'package_version=%s\n' "$package_version" \
     >"$fixture_root/packaging/linux/$lifecycle_script"

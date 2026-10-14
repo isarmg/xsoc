@@ -114,7 +114,7 @@ fn noncurrent_configuration_is_rejected_without_rewriting_or_starting_runtime() 
     let before = local_tree_snapshot(&fixture.root);
     let mut command = fixture.command();
     command
-        .args(["run", "--output", "json", "--config"])
+        .args(["run", "--format", "json", "--config"])
         .arg(&config_path);
     let output = bounded_output(command);
     assert_eq!(output.status.code(), Some(2));
@@ -163,7 +163,7 @@ fn identity_quarantine_is_reported_by_read_only_cli_without_disclosing_or_modify
     for name in ["status", "doctor"] {
         let mut command = fixture.command();
         command
-            .args([name, "--output", "json", "--config"])
+            .args([name, "--format", "json", "--config"])
             .arg(&config_path);
         let output = bounded_output(command);
         assert_eq!(output.status.success(), name == "status");
@@ -258,7 +258,7 @@ fn tls_diagnostics_use_real_client_inputs_without_network_writes_or_secret_outpu
         for command_name in ["status", "doctor"] {
             let mut command = fixture.command();
             command
-                .args([command_name, "--output", "json", "--config"])
+                .args([command_name, "--format", "json", "--config"])
                 .arg(&config_path);
             let output = bounded_output(command);
             let stdout = String::from_utf8_lossy(&output.stdout);
@@ -376,7 +376,7 @@ fn credential_diagnostics_are_bounded_read_only_and_reject_unsafe_files() {
         for name in ["status", "doctor"] {
             let mut command = fixture.command();
             command
-                .args([name, "--output", "json", "--config"])
+                .args([name, "--format", "json", "--config"])
                 .arg(&config_path);
             let output = bounded_output(command);
             assert!(!String::from_utf8_lossy(&output.stdout).contains(&valid_credential));
@@ -481,7 +481,7 @@ fn status_reports_a_missing_explicit_config_without_creating_state() {
         .command()
         .args([
             "status",
-            "--output",
+            "--format",
             "json",
             "--config",
             missing.to_str().unwrap(),
@@ -538,7 +538,7 @@ fn delivery_lock_precedes_bootstrap_and_read_only_commands_remain_concurrent() {
     for command in ["status", "doctor", "probe"] {
         let output = fixture
             .command()
-            .args([command, "--output", "json"])
+            .args([command, "--format", "json"])
             .arg("--config")
             .arg(&path)
             .output()
@@ -624,5 +624,80 @@ fn environment_config_is_explicit_and_does_not_hide_help() {
         let mut command = fixture.command();
         command.env("XSOC_CONFIG", "relative.json").arg(flag);
         assert!(bounded_output(command).status.success());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn finite_collection_and_diagnostics_honor_ndjson_without_changing_retained_state() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    xcsc::fs_safety::PrivateDirectory::create(&fixture.state_dir).unwrap();
+    let invalid_identity = fixture.state_dir.join("host-id");
+    fs::write(&invalid_identity, b"invalid-current-identity-evidence").unwrap();
+    fs::set_permissions(&invalid_identity, fs::Permissions::from_mode(0o600)).unwrap();
+    let mut config = xsoc::ClientConfig::default();
+    config.state_dir = fixture.state_dir.clone();
+    config.smart.enabled = false;
+    let path = fixture.root.join("config.json");
+    fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    let before = local_tree_snapshot(&fixture.root);
+    for command in ["probe", "doctor"] {
+        for format in ["json", "ndjson"] {
+            let mut process = fixture.command();
+            process
+                .args([command, "--format", format, "--config"])
+                .arg(&path);
+            let output = bounded_output(process);
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            if format == "ndjson" {
+                assert_eq!(String::from_utf8_lossy(&output.stdout).lines().count(), 1);
+            } else {
+                assert!(String::from_utf8_lossy(&output.stdout).lines().count() > 1);
+            }
+            if command == "doctor" {
+                assert_eq!(output.status.code(), Some(12));
+                assert_eq!(value["command"], "doctor");
+                assert_eq!(value["status"], "unhealthy");
+                assert!(
+                    value["checks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|check| check["id"] == "identity" && check["status"] == "error")
+                );
+            } else {
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(value["system"].is_object());
+            }
+            assert_eq!(local_tree_snapshot(&fixture.root), before);
+            assert!(
+                !String::from_utf8_lossy(&output.stdout)
+                    .contains("invalid-current-identity-evidence")
+            );
+        }
+    }
+}
+
+#[test]
+fn removed_output_aliases_are_rejected_before_configuration_or_state_creation() {
+    let fixture = Fixture::new();
+    for alias in [vec!["--output", "json"], vec!["--json"]] {
+        let mut process = fixture.command();
+        process
+            .args(["probe", "--format", "json", "--config"])
+            .arg(fixture.root.join("missing.json"))
+            .args(alias);
+        let output = process.output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], "unknown_option");
+        assert!(!fixture.state_dir.exists());
+        assert_eq!(fs::read_dir(&fixture.root).unwrap().count(), 0);
     }
 }
