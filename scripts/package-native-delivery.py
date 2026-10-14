@@ -30,7 +30,7 @@ def main():
     inventory=importlib.util.module_from_spec(spec);spec.loader.exec_module(inventory)
     environment=inventory.clean_environment();revision=inventory.run(['git','rev-parse','HEAD'],ROOT,environment)
     with tempfile.TemporaryDirectory(prefix='client-native-delivery-') as temporary:
-        private=Path(temporary);tools=inventory.checkout_tools(private/'tools',environment)
+        private=Path(temporary).resolve(strict=True);tools=inventory.checkout_tools(private/'tools',environment)
         extractor=inventory.load_tool('native_package',tools)
         finalizer=inventory.load_tool('release_sbom',tools)
         checksums=inventory.load_tool('release_manifest',tools)

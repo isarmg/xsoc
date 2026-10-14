@@ -105,7 +105,7 @@ def generate(stage, *, product, version, revision, target, root_name,
     (stage / 'share').mkdir(mode=0o755, exist_ok=True)
     (stage / 'share').chmod(0o755)
     with tempfile.TemporaryDirectory(prefix=product + '-release-inventory-') as temporary:
-        private = Path(temporary)
+        private = Path(temporary).resolve(strict=True)
         tools = checkout_tools(private / 'tools', environment)
         source = exported_source(private / 'source', revision, environment)
         producer = load_tool('sbom', tools)

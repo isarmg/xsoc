@@ -76,7 +76,7 @@ def main():
     delivery = output / f'xsoc-{version}-{target}-native-delivery.tar.gz'
     with tempfile.TemporaryDirectory(prefix='xsoc-final-native-') as temporary:
         arguments = [sys.executable, str(ROOT / 'scripts/package-native-delivery.py'),
-                     '--stage', str(Path(temporary) / 'delivery'), '--target', target,
+                     '--stage', str(Path(temporary).resolve(strict=True) / 'delivery'), '--target', target,
                      '--output', str(delivery.resolve())]
         for asset in assets:
             arguments.extend(['--artifact', str(asset.resolve()), '--inner-bom', str(inner.resolve())])

@@ -28,7 +28,7 @@ def main():
         raise ValueError('release software version is not its exact current Cargo identity')
     revision=module.run(['git','rev-parse','HEAD'],ROOT,environment)
     with tempfile.TemporaryDirectory(prefix='client-release-checksums-') as temporary:
-        tools=module.checkout_tools(Path(temporary)/'tools',environment)
+        tools=module.checkout_tools(Path(temporary).resolve(strict=True)/'tools',environment)
         verifier=tools/'scripts/release_manifest.py'
         module.run([sys.executable,str(verifier),'finalize',str(args.stage),
             '--product',profile['product_id'],'--version',version,

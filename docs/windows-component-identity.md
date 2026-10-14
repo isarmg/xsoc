@@ -12,7 +12,7 @@ XSOC 1.0.5 为自己的服务文件和状态登记使用独立、固定的组件
 
 两个新 GUID 一次性按 UUIDv5 生成并写入 WiX 源码：命名空间为上述 UpgradeCode，名称分别为 `ClientServiceComponent:always64:xsoc.exe` 和 `ClientStateDirectoryComponent:always64:HKLM\Software\sarmg\xsoc\ManagedStateDirectory`。构建不会重新生成它们。其余标识在当前三个客户端的 WiX 源码中没有重复，且没有外部冲突证据，保持不变。
 
-相同 x64 资源集及键路径在维修和后续版本中保持组件身份。更改资源集、名称、位置或位数时，需要按[微软组件规则](https://learn.microsoft.com/en-us/windows/win32/msi/changing-the-component-code)重新审查。修复包使用高于已发布 1.0.4 的 MSI 版本，保留同一 UpgradeCode；`MajorUpgrade` 固定在 `afterInstallInitialize`，使旧产品在事务内、安装和登记新组件之前移除，失败时仍可回滚。不得把换了组件身份的另一个安装包作为同版维修包发布。
+相同 x64 资源集及键路径在维修和后续版本中保持组件身份。更改资源集、名称、位置或位数时，需要按[微软组件规则](https://learn.microsoft.com/en-us/windows/win32/msi/changing-the-component-code)重新审查。本次发行基线为 MSI 版本 1.0.0，保留该 UpgradeCode；`MajorUpgrade` 固定在 `afterInstallInitialize`，使旧产品在事务内、安装和登记新组件之前移除，失败时仍可回滚。不得把换了组件身份的另一个安装包作为同版维修包发布。
 
 普通卸载只移除程序、服务、产品登记和产品 PATH，保留配置、身份、凭据、队列与日志。日志租约文件仍须为预期名称的零长度安全文件，即使外部进程持有其字节锁也必须接受完整维护校验；载荷日志继续有界读取。
 

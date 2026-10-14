@@ -17,7 +17,7 @@ def main():
     spec=importlib.util.spec_from_file_location('client_inventory',ROOT/'scripts/release-inventory.py')
     inventory=importlib.util.module_from_spec(spec);spec.loader.exec_module(inventory)
     with tempfile.TemporaryDirectory(prefix='xsoc-bootstrap-inventory-') as temporary:
-        private=Path(temporary);tools=inventory.checkout_tools(private/'tools',inventory.clean_environment())
+        private=Path(temporary).resolve(strict=True);tools=inventory.checkout_tools(private/'tools',inventory.clean_environment())
         extractor=inventory.load_tool('native_package',tools)
         payload,_=extractor.msi_payload(args.bootstrap_msi.resolve(strict=True),private/'msi',include_embedded=True)
         shutil.copytree(payload,args.stage)

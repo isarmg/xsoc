@@ -1,6 +1,6 @@
 # xsoc
 
-当前源码候选版本为 **1.0.6**，尚未发布。以下同版包名用于源码构建产物或后续正式发行；下载前核对对应 Release 已存在，旧版资产不包含本轮修复。
+当前源码候选版本为 **1.0.0**，尚未发布。以下同版包名用于源码构建产物或后续正式发行；下载前核对对应 Release 已存在，旧版资产不包含本轮修复。
 
 xsoc 是 xsos 的只读主机监控客户端，主动通过 HTTPS 上报遥测，并在断网时使用有界本地队列重试。
 
@@ -16,14 +16,14 @@ Windows 11 x64、Linux x86_64（systemd，提供 DEB/RPM）和 macOS Apple Silic
 
 ## 快速部署
 
-以下包名按 1.0.6 发布准备；正式下载以发布页已经完成验证的资产为准。
+以下包名按 1.0.0 发布准备；正式下载以发布页已经完成验证的资产为准。
 
 从 [Release](https://github.com/isarmg/xsoc/releases) 下载本机平台的安装包及对应 `SHA256SUMS-*`，核对 SHA-256 后安装。准备 xsos 管理员提供的 HTTPS 地址与实例授权码。
 
-Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.6.x86_64.rpm`）：
+Linux（Debian/Ubuntu；RPM 系统改用 `sudo dnf install ./xsoc-1.0.0.x86_64.rpm`）：
 
 ```sh
-sudo apt install ./xsoc_1.0.6_amd64.deb
+sudo apt install ./xsoc_1.0.0_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json
@@ -32,13 +32,13 @@ sudo xsoc status --check --format json
 macOS Apple Silicon：
 
 ```sh
-sudo installer -pkg ./xsoc-1.0.6-macos-arm64-unsigned.pkg -target /
+sudo installer -pkg ./xsoc-1.0.0-macos-arm64-unsigned.pkg -target /
 sudo /usr/local/bin/xsoc service stop
 sudo /usr/local/bin/xsoc setup --interactive
 sudo /usr/local/bin/xsoc status --check --format json
 ```
 
-Windows：运行 `xsoc-1.0.6-x64.msi` 完成安装，再打开新的管理员 PowerShell：
+Windows：运行 `xsoc-1.0.0-x64.msi` 完成安装，再打开新的管理员 PowerShell：
 
 ```powershell
 xsoc service stop
@@ -57,7 +57,7 @@ git clone https://github.com/isarmg/xsoc.git
 cd xsoc
 XSOC_BUILD_SHA="$(git rev-parse HEAD)" cargo build --locked --release --bin xsoc
 sh packaging/linux/build-packages.sh
-sudo apt install ./dist/xsoc_1.0.6_amd64.deb
+sudo apt install ./dist/xsoc_1.0.0_amd64.deb
 sudo xsoc service stop
 sudo xsoc setup --interactive
 sudo xsoc status --check --format json
