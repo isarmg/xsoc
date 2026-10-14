@@ -13,7 +13,11 @@ New-Item -ItemType Directory -Path $work | Out-Null
 try {
     $project=Join-Path $PSScriptRoot 'Xsoc.Installer.wixproj'
     $client=(Resolve-Path -LiteralPath $ClientExe).Path
-    $maintenance=(Resolve-Path -LiteralPath $MaintenanceExe).Path
+    # Cargo may hardlink its top-level executable to its deps artifact. The
+    # package authority reads one private regular file used by both MSI builds.
+    $maintenance=Join-Path $work 'xsoc-maintenance.exe'
+    Copy-Item -LiteralPath (Resolve-Path -LiteralPath $MaintenanceExe).Path -Destination $maintenance
+    $maintenance=(Resolve-Path -LiteralPath $maintenance).Path
     $smart=(Resolve-Path -LiteralPath $SmartmontoolsDir).Path
     $common=@('-c','Release',"-p:ProductVersion=$Version","-p:ClientExe=$client","-p:MaintenanceExe=$maintenance","-p:SmartmontoolsDir=$smart","-p:BaseIntermediateOutputPath=$work\obj\")
     & dotnet build $project @common "-p:OutputPath=$work\bootstrap\"
