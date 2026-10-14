@@ -15,6 +15,11 @@ on:
 
 permissions: {}
 
+# Superseded branch/PR CI can stop; release and manual runs stay independent.
+concurrency:
+  group: xsoc-ci-${{ github.workflow }}-${{ github.event_name }}-${{ !inputs.force_full && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) && github.ref || github.run_id }}
+  cancel-in-progress: ${{ !inputs.force_full && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_type == 'branch')) }}
+
 env:
   CARGO_TERM_COLOR: always
   XSOC_BUILD_SHA: ${{ github.sha }}
