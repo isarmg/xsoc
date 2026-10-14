@@ -37,6 +37,9 @@ if ($LASTEXITCODE) { throw 'Current MSI source installation policy failed' }
     $output=Join-Path $PSScriptRoot 'bin/x64/Release'
     & dotnet build $project @common "-p:OutputPath=$output\" '-p:IncludeInventory=1' "-p:InventoryWxs=$work\inventory.wxs"
     if ($LASTEXITCODE) { throw 'Final MSI build failed' }
+    # Lifecycle checks compare the exact generated inventory components with
+    # compiled MSI tables; this build-only sidecar is never a release asset.
+    Copy-Item -LiteralPath "$work\inventory.wxs" -Destination (Join-Path $output "xsoc-$Version-x64.msi.inventory-authoring.wxs")
     $metadata=Join-Path $root 'dist/native-inventory'
     New-Item -ItemType Directory -Force -Path $metadata | Out-Null
     Copy-Item -LiteralPath (Join-Path $payload 'share/release-sbom.cdx.json') -Destination (Join-Path $metadata 'windows-inner.cdx.json')

@@ -43,12 +43,69 @@ function Read-XsocMsiIdentity([string]$Path) {
         if ($properties.ProductName -ne 'xsoc' -or $properties.UpgradeCode -ne '{B4A341EC-D4B2-419F-A00B-E8E504DE9798}') {
             throw 'Compiled MSI has the wrong product or upgrade identity.'
         }
-        $components = @(Read-MsiRows $database 'SELECT `Component`, `ComponentId`, `Attributes`, `KeyPath` FROM `Component`' @('Id', 'Guid', 'Attributes', 'KeyPath'))
-        if ($components.Count -ne $xsocComponentGuids.Count) { throw 'Unexpected compiled MSI component set.' }
+        $authoringPath=$Path+'.inventory-authoring.wxs'
+        $authoringInfo=Get-Item -LiteralPath $authoringPath
+        if ($authoringInfo -isnot [IO.FileInfo] -or ($authoringInfo.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+            $authoringInfo.Length -gt 4194304) { throw 'Inventory authoring must be a bounded physical build input.' }
+        $settings=[Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing=[Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver=$null
+        $reader=[Xml.XmlReader]::Create($authoringPath,$settings)
+        $authoring=[Xml.XmlDocument]::new()
+        try {$authoring.Load($reader)} finally {$reader.Close()}
+        $inventory=@{}
+        $inventoryDirectories=@{ReleaseInventoryDirectory=@{Parent='INSTALLFOLDER';Name='share'}}
+        foreach ($directory in $authoring.SelectNodes('//*[local-name()="Directory"]')) {
+            $directoryId=$directory.GetAttribute('Id')
+            if ($inventoryDirectories.Count -ge 16384 -or $directoryId -notmatch '^InventoryDir_[0-9a-f]{24}$' -or
+                $inventoryDirectories.ContainsKey($directoryId)) { throw 'Generated inventory directory identity is invalid.' }
+            $inventoryDirectories[$directoryId]=@{Parent=$directory.ParentNode.GetAttribute('Id');Name=$directory.GetAttribute('Name')}
+        }
+        foreach ($node in $authoring.SelectNodes('//*[local-name()="Component"]')) {
+            $componentId=$node.GetAttribute('Id')
+            if ($inventory.Count -ge 16384 -or $componentId -notmatch '^Inventory_[0-9a-f]{32}$' -or
+                $node.GetAttribute('Bitness') -ne 'always64' -or $inventory.ContainsKey($componentId)) {
+                throw 'Generated inventory component identity is ambiguous or outside its bound.'
+            }
+            $file=@($node.SelectNodes('./*[local-name()="File"]'))
+            if ($file.Count -ne 1 -or $file[0].GetAttribute('Id') -ne ($componentId+'_file') -or $file[0].GetAttribute('KeyPath') -ne 'yes') {
+                throw 'Generated inventory component has no exact file key path.'
+            }
+            $parent=$node.ParentNode
+            if ($parent.LocalName -notin @('Directory','DirectoryRef')) { throw 'Inventory component has no source directory.' }
+            $inventory[$componentId]=@{Guid=([guid]$node.GetAttribute('Guid')).ToString('B').ToUpperInvariant();KeyPath=$file[0].GetAttribute('Id');Directory=$parent.GetAttribute('Id');Name=$file[0].GetAttribute('Name')}
+        }
+        if ($inventory.Count -eq 0) { throw 'The compiled product must include its actual inventory authoring.' }
+        $compiledDirectories=@{}
+        foreach ($row in @(Read-MsiRows $database 'SELECT `Directory`, `Directory_Parent`, `DefaultDir` FROM `Directory`' @('Id','Parent','Name'))) {
+            $compiledDirectories[$row.Id]=$row
+        }
+        foreach ($id in $inventoryDirectories.Keys) {
+            $expected=$inventoryDirectories[$id]
+            if (-not $compiledDirectories.ContainsKey($id) -or $compiledDirectories[$id].Parent -ne $expected.Parent -or
+                $compiledDirectories[$id].Name.Split(':')[0].Split('|')[-1] -ne $expected.Name) {
+                throw "Compiled inventory directory differs from its exact generated source: $id"
+            }
+        }
+        $components = @(Read-MsiRows $database 'SELECT `Component`, `ComponentId`, `Attributes`, `KeyPath`, `Directory_` FROM `Component`' @('Id', 'Guid', 'Attributes', 'KeyPath', 'Directory'))
+        if ($components.Count -ne ($xsocComponentGuids.Count+$inventory.Count)) { throw 'Unexpected compiled MSI component set.' }
+        $inventorySeen=@{}
         foreach ($component in $components) {
+            if ($inventory.ContainsKey($component.Id)) {
+                $expected=$inventory[$component.Id]
+                $file=@(Read-MsiRows $database ("SELECT ``File``, ``Component_``, ``FileName`` FROM ``File`` WHERE ``File``='$($expected.KeyPath)'" ) @('Id','Component','Name'))
+                if ($inventorySeen.ContainsKey($component.Id) -or $component.Guid -ne $expected.Guid -or
+                    [int]$component.Attributes -ne 256 -or $component.KeyPath -ne $expected.KeyPath -or
+                    $component.Directory -ne $expected.Directory -or $file.Count -ne 1 -or
+                    $file[0].Component -ne $component.Id -or $file[0].Name.Split('|')[-1] -ne $expected.Name) {
+                    throw "Compiled inventory component differs from its exact generated authoring: $($component.Id)"
+                }
+                $inventorySeen[$component.Id]=$true
+                continue
+            }
             if (-not $xsocComponentGuids.ContainsKey($component.Id) -or
                 $component.Guid -ne $xsocComponentGuids[$component.Id] -or
-                ([int]$component.Attributes -band 256) -eq 0) {
+                [int]$component.Attributes -ne $(if ($component.Id -eq 'ClientStateDirectoryComponent') {260} else {256})) {
                 throw "Compiled component identity or x64 attribute drifted: $($component.Id)"
             }
             if ($component.Id -eq 'ClientStateDirectoryComponent') {
@@ -217,14 +274,17 @@ function Build-ComponentTransitionBaseline([string]$Version) {
     # Compile today's source at a distinct version so both helpers can retain
     # their own rollback journals until the enclosing upgrade commits.
     $sourceRoot = Join-Path $env:RUNNER_TEMP ('xsoc-transition-source-' + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $sourceRoot | Out-Null
-    $trackedFiles = @(& git -C $repositoryRoot ls-files)
-    if ($LASTEXITCODE -ne 0 -or $trackedFiles.Count -eq 0) { throw 'Cannot enumerate current fixture sources.' }
-    foreach ($relative in $trackedFiles) {
-        $destination = Join-Path $sourceRoot $relative
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $repositoryRoot $relative) -Destination $destination
+    $sourceRevision=(& git -C $repositoryRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $sourceRevision -notmatch '^[0-9a-f]{40}$' -or
+        @(& git -C $repositoryRoot status --porcelain --untracked-files=all).Count -ne 0) {
+        throw 'The transition fixture requires the exact clean current source.'
     }
+    # This private local clone retains the producer's source identity contract.
+    # Independent Git objects avoid changing the checkout used by later tests.
+    & git -c core.hooksPath=NUL clone --quiet --no-hardlinks --no-checkout --local $repositoryRoot $sourceRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot clone the current transition fixture source.' }
+    & git -C $sourceRoot -c core.autocrlf=false -c core.hooksPath=NUL checkout --quiet --detach $sourceRevision
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot check out the exact transition fixture source.' }
     $utf8 = [Text.UTF8Encoding]::new($false)
     foreach ($entry in @(
         @{ File = 'Cargo.toml'; Pattern = '(?m)(^\[workspace\.package\]\r?\nversion = ")[^"]+("\r?$)' },
@@ -238,17 +298,33 @@ function Build-ComponentTransitionBaseline([string]$Version) {
         $text = [regex]::Replace($text, $entry.Pattern, ('${1}' + $Version + '${2}'))
         [IO.File]::WriteAllText($path, $text, $utf8)
     }
+    & git -C $sourceRoot -c core.autocrlf=false add -- Cargo.toml Cargo.lock
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot stage the synthetic current-source version.' }
+    & git -C $sourceRoot -c core.hooksPath=NUL -c commit.gpgsign=false `
+        -c user.name='XSOC current-source fixture' -c user.email='fixture@example.invalid' `
+        commit --quiet --message 'Synthetic current-source component transaction fixture'
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the synthetic current-source version.' }
+    $fixtureRevision=(& git -C $sourceRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or $fixtureRevision -notmatch '^[0-9a-f]{40}$' -or
+        @(& git -C $sourceRoot status --porcelain --untracked-files=all).Count -ne 0) {
+        throw 'The synthetic transition fixture must have a clean immutable identity.'
+    }
     # An isolated target directory cannot overwrite the release Client/helper
     # that later lifecycle tests invoke. Cargo's download cache is still shared.
     $targetRoot = Join-Path $sourceRoot 'target'
-    & cargo build --locked --release --manifest-path (Join-Path $sourceRoot 'Cargo.toml') `
-        --target-dir $targetRoot --target x86_64-pc-windows-msvc --bin xsoc --bin xsoc-maintenance | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to build the current-source transition baseline.' }
-    $binaryRoot = Join-Path $targetRoot 'x86_64-pc-windows-msvc\release'
-    & (Join-Path $sourceRoot 'packaging\windows\wix\build-msi.cmd') $Version `
-        (Join-Path $binaryRoot 'xsoc.exe') (Join-Path $binaryRoot 'xsoc-maintenance.exe') `
-        $SmartmontoolsDirectory | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Failed to package the current-source transition baseline.' }
+    $previousBuildSha=$env:XSOC_BUILD_SHA
+    try {
+        $env:XSOC_BUILD_SHA=$fixtureRevision
+        & cargo build --locked --release --manifest-path (Join-Path $sourceRoot 'Cargo.toml') `
+            --target-dir $targetRoot --target x86_64-pc-windows-msvc --bin xsoc --bin xsoc-maintenance | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to build the current-source transition baseline.' }
+        $binaryRoot = Join-Path $targetRoot 'x86_64-pc-windows-msvc\release'
+        & (Join-Path $sourceRoot 'packaging\windows\wix\build-msi.cmd') $Version `
+            (Join-Path $binaryRoot 'xsoc.exe') (Join-Path $binaryRoot 'xsoc-maintenance.exe') `
+            $SmartmontoolsDirectory | Out-Host
+        if ($LASTEXITCODE -ne 0) { throw 'Failed to package the current-source transition baseline.' }
+    }
+    finally { $env:XSOC_BUILD_SHA=$previousBuildSha }
     $packages = @(Get-ChildItem (Join-Path $sourceRoot 'packaging\windows\wix\bin\x64\Release') `
         -Filter '*.msi' -Recurse)
     if ($packages.Count -ne 1) { throw 'Expected exactly one compiled transition baseline MSI.' }
