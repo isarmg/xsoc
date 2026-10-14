@@ -27,7 +27,6 @@ xsoc 是只读主机监控客户端，以系统服务主动连接 xsos。这里�
 - [命令参考](cli-compatibility.md)：命令、输出和状态路径
 - [开发指南](development.md)：共用工具链、测试和源码结构
 - [公共库](common-support.md)与[原生接口审查](unsafe-audit.md)
-- [1.0.1 发行说明](releases/1.0.1.md)
-- [1.0.0 历史发行说明](releases/1.0.0.md)
+- [1.0.0 发行说明](releases/1.0.0.md)
 
 指标范围与设备要求见[硬件监控](hardware-monitoring.md)和[Windows AMD / Intel GPU](windows-gpu-vendors.md)。
