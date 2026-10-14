@@ -81,3 +81,21 @@ roughly 8–12 minutes for normal pushes. A wholly cold cache is expected to nee
 roughly 17–20 minutes because source-built tools and genuine MSI transitions
 remain mandatory. These are estimates, not measured guarantees; compare the
 exact-commit workflow timings after the first cold run and next warm run.
+
+
+The first measured warm Windows run after parallelization still needed about
+13m46s overall. Its 384 MB Cargo cache downloaded in about four seconds but took
+about 150 seconds to extract; native release compilation was 35 seconds. Native
+package jobs now cache Cargo registry archives/index and Git databases rather
+than the expanded registry sources/checkouts. Cargo re-extracts the sources it
+needs; that cost remains part of the next measured build/inventory timings.
+The v2 native cache key deliberately requires one new cold population.
+
+The MSI transition fixture still clones and commits its own current-source
+baseline and builds both executables. It now physically copies only third-party
+release dependency outputs into its fresh target, excluding all xsoc outputs,
+fingerprints and build scripts. No hard links or product executables are used.
+The copy logs file count, bytes and elapsed seconds, and the built baseline's
+version and commit must match its independent source identity before packaging.
+The native target is never written by that fixture. Inventory, licensing,
+advisory checks and every real installation transition remain unchanged.

@@ -313,9 +313,13 @@ function Build-ComponentTransitionBaseline([string]$Version) {
         @(& git -C $sourceRoot status --porcelain --untracked-files=all).Count -ne 0) {
         throw 'The synthetic transition fixture must have a clean immutable identity.'
     }
-    # An isolated target directory cannot overwrite the release Client/helper
-    # that later lifecycle tests invoke. Cargo's download cache is still shared.
+    # Seed only third-party dependency outputs using independent physical files.
+    # No xsoc object, fingerprint, build-script output or executable is reused.
+    # The fresh target cannot overwrite the current release Client/helper.
     $targetRoot = Join-Path $sourceRoot 'target'
+    & python (Join-Path $repositoryRoot 'scripts/seed-transition-dependencies.py') `
+        --source (Join-Path $repositoryRoot 'target') --destination $targetRoot
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot seed independent transition dependencies.' }
     $previousBuildSha=$env:XSOC_BUILD_SHA
     try {
         $env:XSOC_BUILD_SHA=$fixtureRevision
@@ -323,6 +327,13 @@ function Build-ComponentTransitionBaseline([string]$Version) {
             --target-dir $targetRoot --target x86_64-pc-windows-msvc --bin xsoc --bin xsoc-maintenance | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Failed to build the current-source transition baseline.' }
         $binaryRoot = Join-Path $targetRoot 'x86_64-pc-windows-msvc\release'
+        $fixtureIdentityText = & (Join-Path $binaryRoot 'xsoc.exe') version --format json
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot read transition executable source identity.' }
+        $fixtureIdentity = ($fixtureIdentityText -join "`n") | ConvertFrom-Json
+        if ($fixtureIdentity.commit -ne $fixtureRevision -or $fixtureIdentity.version -ne $Version) {
+            throw 'Transition executable differs from its independently compiled source/version.'
+        }
+        Write-Host "Verified transition executable identity: $fixtureRevision ($Version)"
         & (Join-Path $sourceRoot 'packaging\windows\wix\build-msi.cmd') $Version `
             (Join-Path $binaryRoot 'xsoc.exe') (Join-Path $binaryRoot 'xsoc-maintenance.exe') `
             $SmartmontoolsDirectory | Out-Host
