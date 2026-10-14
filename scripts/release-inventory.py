@@ -51,7 +51,7 @@ def exported_source(destination, revision, environment):
     if not re.fullmatch('[0-9a-f]{40}', revision) or run(['git', 'rev-parse', 'HEAD'], ROOT, environment) != revision or run(['git', 'status', '--porcelain', '--untracked-files=all'], ROOT, environment):
         raise ValueError('runtime inventory requires the exact clean compiled source')
     archive = destination.parent / 'source.tar'
-    run(['git', 'archive', '--format=tar', '--output', str(archive), revision], ROOT, environment)
+    run(['git', '-c', 'core.autocrlf=false', 'archive', '--format=tar', '--output', str(archive), revision], ROOT, environment)
     destination.mkdir(mode=0o700)
     with tarfile.open(archive) as source:
         for entry in source:
