@@ -48,6 +48,10 @@ class SeedTests(unittest.TestCase):
         (self.target / paths[0]).write_bytes(b"changed fixture")
         self.assertEqual((self.source / paths[0]).read_bytes(), b"dependency")
 
+    def test_powershell_seed_log_does_not_pollute_returned_msi_path(self):
+        caller = (Path(__file__).resolve().parents[1] / "packaging/windows/tests/MsiComponentChecks.ps1").read_text(encoding="utf-8")
+        self.assertIn("--source (Join-Path $repositoryRoot 'target') --destination $targetRoot | Out-Host", caller)
+
     def test_rejects_existing_destination(self):
         self.target.mkdir()
         with self.assertRaisesRegex(ValueError, "fresh"):

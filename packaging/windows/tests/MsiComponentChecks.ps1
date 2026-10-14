@@ -318,7 +318,7 @@ function Build-ComponentTransitionBaseline([string]$Version) {
     # The fresh target cannot overwrite the current release Client/helper.
     $targetRoot = Join-Path $sourceRoot 'target'
     & python (Join-Path $repositoryRoot 'scripts/seed-transition-dependencies.py') `
-        --source (Join-Path $repositoryRoot 'target') --destination $targetRoot
+        --source (Join-Path $repositoryRoot 'target') --destination $targetRoot | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Cannot seed independent transition dependencies.' }
     $previousBuildSha=$env:XSOC_BUILD_SHA
     try {
