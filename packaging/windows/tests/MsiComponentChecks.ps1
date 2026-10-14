@@ -189,8 +189,12 @@ function Assert-XsocComponentRegistrationAbsent([string]$ProductCode) {
 function Test-MsiComponentCoexistence([string]$CurrentMsi, [string]$ProductCode) {
     $fixtureProject = Join-Path $PSScriptRoot 'fixtures\ComponentOwner\Fixture.wixproj'
     $fixtureOutput = Join-Path $logs 'component-owner-fixture'
+    $fixtureIntermediate = Join-Path $logs 'component-owner-intermediate'
     $fixturePayload = Join-Path $repositoryRoot 'target\x86_64-pc-windows-msvc\release\xsoc.exe'
-    & dotnet build $fixtureProject -c Release "-p:ClientExe=$fixturePayload" "-p:OutputPath=$fixtureOutput"
+    # Restore/build intermediates belong to the disposable fixture, so later
+    # current-source packaging can retain its strict clean checkout guard.
+    & dotnet build $fixtureProject -c Release "-p:ClientExe=$fixturePayload" `
+        "-p:OutputPath=$fixtureOutput" "-p:BaseIntermediateOutputPath=$fixtureIntermediate/"
     if ($LASTEXITCODE -ne 0) { throw 'Could not build the unrelated component-owner MSI fixture.' }
     $fixturePackages = @(Get-ChildItem -LiteralPath $fixtureOutput -Filter '*.msi' -Recurse)
     if ($fixturePackages.Count -ne 1) { throw 'Expected exactly one unrelated component-owner MSI.' }
