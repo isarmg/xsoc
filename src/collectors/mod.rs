@@ -15,7 +15,7 @@ use crate::model::{
     CLIENT_REPORT_MAX_CAPABILITIES, CLIENT_REPORT_MAX_CPU_CORES, CLIENT_REPORT_MAX_DISKS,
     CLIENT_REPORT_MAX_NETWORKS, CLIENT_REPORT_MAX_TEMPERATURES, CLIENT_REPORT_SCHEMA_VERSION,
     Capability, CapabilityErrorKind, ClientHealth, ClientReport, CpuSnapshot, DiskSnapshot,
-    GpuSnapshot, HostIdentity, MemorySnapshot, NetworkSnapshot, SystemSnapshot,
+    GpuSnapshot, HardwareSensor, HostIdentity, MemorySnapshot, NetworkSnapshot, SystemSnapshot,
     TemperatureSnapshot,
 };
 #[cfg(any(target_os = "windows", test))]
@@ -193,14 +193,7 @@ impl SystemSampler {
             hardware.memory_modules = inventory.memory_modules;
             hardware.devices = inventory.devices;
             hardware.disk_health = disk_health;
-            hardware
-                .sensors
-                .retain(|sensor| !matches!(sensor.source.as_str(), "amd-adlx" | "intel-igcl"));
-            extend_bounded(
-                &mut hardware.sensors,
-                gpu.sensors,
-                crate::model::MAX_HARDWARE_SENSORS,
-            );
+            replace_vendor_sensors(&mut hardware.sensors, gpu.sensors);
         }
         capabilities.push(self.hardware_capability.clone());
         capabilities.push(smart_capability);
@@ -312,6 +305,18 @@ fn host_details(id: String) -> HostIdentity {
         arch: std::env::consts::ARCH.to_string(),
         client_version: env!("CARGO_PKG_VERSION").to_string(),
     }
+}
+
+fn replace_vendor_sensors(sensors: &mut Vec<HardwareSensor>, current: Vec<HardwareSensor>) {
+    // Vendor readings refresh independently of the slow hardware snapshot, including
+    // older ADLX drivers whose sensor identity has no Windows LUID.
+    sensors.retain(|sensor| {
+        !matches!(
+            sensor.source.as_str(),
+            "amd-adlx" | "amd-adlx-no-luid" | "intel-igcl"
+        )
+    });
+    extend_bounded(sensors, current, crate::model::MAX_HARDWARE_SENSORS);
 }
 
 fn collect_networks(networks: &Networks, interval_seconds: f64) -> Vec<NetworkSnapshot> {
@@ -717,6 +722,38 @@ mod tests {
     use std::cell::Cell;
 
     use super::*;
+
+    #[test]
+    fn vendor_sensor_refresh_replaces_no_luid_readings_and_clears_expired_values() {
+        let sensor = |source: &str, value| HardwareSensor {
+            id: "fan0".into(),
+            label: "Fan".into(),
+            kind: crate::model::SensorKind::FanRpm,
+            value,
+            source: source.into(),
+        };
+        let mut cached = vec![sensor("linux-hwmon", 800.0)];
+        for value in [1000.0, 2000.0, 0.0] {
+            replace_vendor_sensors(
+                &mut cached,
+                vec![
+                    sensor("amd-adlx", value),
+                    sensor("amd-adlx-no-luid", value),
+                    sensor("intel-igcl", value),
+                ],
+            );
+            assert_eq!(cached.len(), 4, "only one current reading per provider");
+            assert_eq!(cached[0].value, 800.0, "slow platform sensors stay cached");
+            assert!(cached[1..].iter().all(|sensor| sensor.value == value));
+        }
+        replace_vendor_sensors(&mut cached, vec![]);
+        assert_eq!(
+            cached.len(),
+            1,
+            "expired or failed providers leave no stale readings"
+        );
+        assert_eq!(cached[0].source, "linux-hwmon");
+    }
 
     #[test]
     fn sampler_initialization_does_not_enumerate_processes() {
