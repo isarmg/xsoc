@@ -166,7 +166,7 @@ serde_json = "1"
 thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-xsos-protocol = { git = "https://github.com/isarmg/xsos.git", rev = "043f0aa8bf91c911118547818a7ab35e59a26e60", version = "=1.0.0" }
+xsos-protocol = { git = "https://github.com/isarmg/xsos.git", rev = "0cc4430da371deff3aa5a45a2397f6c42e457eea", version = "=1.0.0" }
 xcsc = { git = "https://github.com/isarmg/xcsc.git", rev = "6fca4299f5c34a79db1c7bd4e889b418d2a58e2d", version = "=1.0.0", features = ["tracing"] }
 uuid = { version = "1", features = ["serde", "v4"] }
 

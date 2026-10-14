@@ -2807,7 +2807,7 @@ dependencies = [
 [[package]]
 name = "xsos-protocol"
 version = "1.0.0"
-source = "git+https://github.com/isarmg/xsos.git?rev=043f0aa8bf91c911118547818a7ab35e59a26e60#043f0aa8bf91c911118547818a7ab35e59a26e60"
+source = "git+https://github.com/isarmg/xsos.git?rev=0cc4430da371deff3aa5a45a2397f6c42e457eea#0cc4430da371deff3aa5a45a2397f6c42e457eea"
 dependencies = [
  "chrono",
  "serde",

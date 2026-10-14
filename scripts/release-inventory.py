@@ -29,7 +29,7 @@ def run(command, cwd, environment):
 
 
 def tools_identity():
-    identity = json.loads((ROOT / 'build-tools-source.json').read_text())
+    identity = json.loads((ROOT / 'build-tools-source.json').read_text(encoding='utf-8'))
     if set(identity) != {'repository', 'revision'} or identity['repository'] != TOOLS_REPOSITORY or not isinstance(identity['revision'], str) or not re.fullmatch('[0-9a-f]{40}', identity['revision']):
         raise ValueError('release build tools require their exact official Git revision')
     return identity
@@ -119,7 +119,7 @@ def generate(stage, *, product, version, revision, target, root_name,
             environment=environment)
         runtime_bindings=[file_binding(stage,value) for value in runtime_files]
         all_components=list(components)
-        normalized=json.loads(bom.read_text())
+        normalized=json.loads(bom.read_text(encoding='utf-8'))
         if any(item.get('name')=='libsqlite3-sys' for item in normalized.get('components',[])):
             native=load_tool('sqlite_receipt',tools)
             all_components.append(native.record(source,stage,'runtime',files=runtime_bindings,
@@ -135,7 +135,7 @@ def generate(stage, *, product, version, revision, target, root_name,
                 shutil.move(path,target_path)
             bom=folder/bom.name
             (stage/'share').rmdir()
-        root = json.loads(bom.read_text())['metadata']['component']['bom-ref']
+        root = json.loads(bom.read_text(encoding='utf-8'))['metadata']['component']['bom-ref']
         receipt = {'format_version': 1,
                    'runtime_roots': [{'ref': root, 'files': runtime_bindings}],
                    'components': all_components}
@@ -146,12 +146,12 @@ def generate(stage, *, product, version, revision, target, root_name,
             path=Path(graph['bom']).resolve(strict=True)
             if not path.is_relative_to(stage):
                 raise ValueError('additional runtime graph must be in the final release stage')
-            root=json.loads(path.read_text())['metadata']['component']['bom-ref']
+            root=json.loads(path.read_text(encoding='utf-8'))['metadata']['component']['bom-ref']
             boms.append(path)
             receipt['runtime_roots'].append({'ref':root,'files':[
                 file_binding(stage,value) for value in graph['files']]})
         receipt_path = private / 'external-components.json'
-        receipt_path.write_text(json.dumps(receipt))
+        receipt_path.write_text(json.dumps(receipt),encoding='utf-8')
         result = finalizer.finalize(stage, boms, receipt_path, product, version,
                                     revision, target, build_input_root=build_input_root,
                                     package_symlinks=package_symlinks,
@@ -182,12 +182,12 @@ def main():
     args = parser.parse_args()
     generate(args.stage, product=args.product, version=args.version,
              revision=args.source_revision, target=args.target, root_name=args.root_name,
-             runtime_files=json.loads(args.runtime_files.read_text()),
+             runtime_files=json.loads(args.runtime_files.read_text(encoding='utf-8')),
              features=args.features, default_features=not args.no_default_features,
-             components=json.loads(args.external_components.read_text()) if args.external_components else [],
+             components=json.loads(args.external_components.read_text(encoding='utf-8')) if args.external_components else [],
              build_input_root=args.build_input_root, manifest_relative=args.manifest,
              package_symlinks=args.package_symlinks,
-             additional_runtime_graphs=json.loads(args.additional_runtime_graphs.read_text()) if args.additional_runtime_graphs else [],
+             additional_runtime_graphs=json.loads(args.additional_runtime_graphs.read_text(encoding='utf-8')) if args.additional_runtime_graphs else [],
              inventory_relative=args.inventory_relative,output_relative=args.output_relative)
 
 
