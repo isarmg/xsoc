@@ -501,7 +501,6 @@ if [ -e "$ownership_marker" ] || [ -L "$ownership_marker" ]; then
   require_no_extended_acl "$ownership_marker" "account ownership marker" || exit 1
   seen_user=0
   seen_group=0
-  seen_legacy_format=0
   seen_marker_format=0
   seen_last_package_version=0
   seen_state_format=0
@@ -510,15 +509,6 @@ if [ -e "$ownership_marker" ] || [ -L "$ownership_marker" ]; then
   seen_group_gid=0
   while IFS= read -r marker_line; do
     case "$marker_line" in
-      format=*)
-        [ "$seen_legacy_format" -eq 0 ] || { echo "Duplicate Client ownership marker field" >&2; exit 1; }
-        legacy_package_version="${marker_line#format=}"
-        is_package_version "$legacy_package_version" || {
-          echo "Invalid legacy ownership marker package version" >&2
-          exit 1
-        }
-        seen_legacy_format=1
-        ;;
       marker_format=1)
         [ "$seen_marker_format" -eq 0 ] || { echo "Duplicate Client ownership marker field" >&2; exit 1; }
         seen_marker_format=1
@@ -567,19 +557,11 @@ if [ -e "$ownership_marker" ] || [ -L "$ownership_marker" ]; then
         ;;
     esac
   done < "$ownership_marker"
-  if [ "$seen_legacy_format" -eq 1 ]; then
-    [ "$seen_marker_format" -eq 0 ] && [ "$seen_last_package_version" -eq 0 ] &&
-      [ "$seen_state_format" -eq 0 ] || {
-      echo "Mixed legacy and current xsoc ownership marker schemas" >&2
-      exit 1
-    }
-  else
-    [ "$seen_marker_format" -eq 1 ] && [ "$seen_last_package_version" -eq 1 ] &&
-      [ "$seen_state_format" -eq 1 ] || {
-      echo "Unsupported or incomplete xsoc ownership marker schema" >&2
-      exit 1
-    }
-  fi
+  [ "$seen_marker_format" -eq 1 ] && [ "$seen_last_package_version" -eq 1 ] &&
+    [ "$seen_state_format" -eq 1 ] || {
+    echo "Unsupported or incomplete xsoc ownership marker schema" >&2
+    exit 1
+  }
   [ "$seen_user" -eq 1 ] && [ "$seen_group" -eq 1 ] && [ "$seen_user_uid" -eq 1 ] &&
     [ "$seen_user_primary_gid" -eq 1 ] && [ "$seen_group_gid" -eq 1 ] || {
     echo "Incomplete xsoc account ownership marker" >&2

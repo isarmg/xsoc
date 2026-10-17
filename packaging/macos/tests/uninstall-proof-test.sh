@@ -407,6 +407,26 @@ assert_incomplete "$case_root"
 [ -e "$case_root/var/db/xsoc/account-ownership" ] ||
   fail 'invalid marker was removed'
 
+case_root="$test_root/non-current-marker"
+make_case "$case_root"
+write_marker "$case_root" 1 1
+sed -e '/^marker_format=/d' -e '/^state_format=/d' \
+  -e 's/^last_package_version=.*/format=0.9.23/' \
+  "$case_root/var/db/xsoc/account-ownership" >"$case_root/old-marker"
+mv "$case_root/old-marker" "$case_root/var/db/xsoc/account-ownership"
+cp "$case_root/var/db/xsoc/account-ownership" "$case_root/marker.before"
+run_case "$case_root"
+assert_incomplete "$case_root"
+[ ! -e "$case_root/dscl-deletes" ] ||
+  fail 'non-current ownership marker authorized account deletion'
+cmp "$case_root/marker.before" "$case_root/var/db/xsoc/account-ownership" ||
+  fail 'non-current ownership marker was modified'
+[ -e "$case_root/Library/Application Support/xsoc/state-sentinel" ] &&
+  [ -e "$case_root/var/log/xsoc.log" ] ||
+  fail 'non-current ownership marker allowed local data removal'
+[ ! -e "$case_root/launchctl-calls" ] ||
+  fail 'non-current ownership marker reached launchd'
+
 case_root="$test_root/invalid-marker-package-version"
 make_case "$case_root"
 write_marker "$case_root" 1 1

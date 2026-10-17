@@ -201,7 +201,6 @@ load_ownership_marker() {
   marker_group_gid="-"
   seen_user=0
   seen_group=0
-  seen_legacy_format=0
   seen_marker_format=0
   seen_last_package_version=0
   seen_state_format=0
@@ -211,12 +210,6 @@ load_ownership_marker() {
   marker_invalid=0
   while IFS= read -r marker_line; do
     case "$marker_line" in
-      format=*)
-        [ "$seen_legacy_format" -eq 0 ] || marker_invalid=1
-        legacy_package_version="${marker_line#format=}"
-        is_package_version "$legacy_package_version" || marker_invalid=1
-        seen_legacy_format=1
-        ;;
       marker_format=1)
         [ "$seen_marker_format" -eq 0 ] || marker_invalid=1
         seen_marker_format=1
@@ -259,13 +252,8 @@ load_ownership_marker() {
       *) marker_invalid=1 ;;
     esac
   done < "$ownership_marker"
-  if [ "$seen_legacy_format" -eq 1 ]; then
-    [ "$seen_marker_format" -eq 0 ] && [ "$seen_last_package_version" -eq 0 ] &&
-      [ "$seen_state_format" -eq 0 ] || marker_invalid=1
-  else
-    [ "$seen_marker_format" -eq 1 ] && [ "$seen_last_package_version" -eq 1 ] &&
-      [ "$seen_state_format" -eq 1 ] || marker_invalid=1
-  fi
+  [ "$seen_marker_format" -eq 1 ] && [ "$seen_last_package_version" -eq 1 ] &&
+    [ "$seen_state_format" -eq 1 ] || marker_invalid=1
   if [ "$marker_invalid" -eq 1 ] ||
     [ "$seen_user" -ne 1 ] || [ "$seen_group" -ne 1 ] ||
     [ "$seen_user_uid" -ne 1 ] || [ "$seen_user_primary_gid" -ne 1 ] ||
@@ -306,6 +294,10 @@ load_ownership_marker() {
 
 if [ "$purge" -eq 1 ]; then
   load_ownership_marker
+  if [ "$purge_incomplete" -eq 1 ]; then
+    echo "xsoc purge refused: ownership metadata is invalid; services, accounts and local files were preserved." >&2
+    exit 2
+  fi
 fi
 
 inspect_launchd_job() {

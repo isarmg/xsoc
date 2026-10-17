@@ -56,7 +56,7 @@ sudo tail -n 100 /var/log/xsoc.log
 sudo /usr/local/share/xsoc/uninstall.sh
 ```
 
-普通卸载停止并移除程序和服务，保留配置、身份、凭据及队列。永久退役且确认待发数据可丢弃后，使用 `sudo /usr/local/share/xsoc/uninstall.sh --purge` 清除安装器管理的本地状态；该操作不可撤销。
+普通卸载停止并移除程序和服务，保留配置、身份、凭据及队列。永久退役且确认待发数据可丢弃后，使用 `sudo /usr/local/share/xsoc/uninstall.sh --purge` 清除安装器管理的本地状态；该操作不可撤销。安装和永久清理仅接受当前 `marker_format=1`、`state_format=1.0.0` 所有权标记；旧结构、未知字段或无效归属证明会拒绝操作并保留原服务、账号与本地文件，不自动转换。
 
 卸载完成后，对应系统服务应不再登记。
 

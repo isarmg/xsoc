@@ -864,7 +864,9 @@ write_ownership_marker_ids() {
   marker_package_version="${5:-@XSOC_PACKAGE_VERSION@}"
   mkdir -p "$marker_case/var/db/xsoc"
   {
-    printf 'format=%s\n' "$marker_package_version"
+    printf 'marker_format=1\n'
+    printf 'last_package_version=%s\n' "$marker_package_version"
+    printf 'state_format=1.0.0\n'
     printf 'user_created=1\n'
     printf 'user_uid=%s\n' "$marker_uid"
     printf 'user_primary_gid=%s\n' "$marker_primary_gid"
@@ -1216,31 +1218,32 @@ grep -Fx 'disable system/org.sarmg.xsoc' "$case_dir/launch/calls" >/dev/null ||
   [ ! -e "$case_dir/launch/loaded.org.sarmg.xsoc" ] ||
   fail 'fresh install must leave Client stopped and disabled'
 
-# A package-version marker from any previous release is bookkeeping, not a
-# persistent-state format. Validate its identity binding and replace it with
-# the explicit marker schema instead of maintaining a release whitelist.
-write_ownership_marker_ids "$case_dir" 450 450 450 0.9.23
+# A non-current ownership schema must fail before touching the running service,
+# accounts or retained state, even when its account IDs happen to match.
+write_ownership_marker_ids "$case_dir" 450 450 450
+sed -e '/^marker_format=/d' -e '/^state_format=/d' \
+  -e 's/^last_package_version=.*/format=0.9.23/' \
+  "$case_dir/var/db/xsoc/account-ownership" >"$case_dir/old-marker"
+mv "$case_dir/old-marker" "$case_dir/var/db/xsoc/account-ownership"
+cp "$case_dir/var/db/xsoc/account-ownership" "$case_dir/marker.before"
+cp "$case_dir/Library/Application Support/xsoc/config.json" "$case_dir/config.before"
 start_prior_client
 reset_fault_counters "$case_dir"
-if run_postinstall "$case_dir" FAIL_BOOTSTRAP_AT=1 \
-  >"$case_dir/legacy-marker-failure.log" 2>&1; then
-  fail 'legacy marker replacement failure unexpectedly succeeded'
+: >"$case_dir/launch/calls"
+if run_postinstall "$case_dir" >"$case_dir/old-marker-rejection.log" 2>&1; then
+  fail 'non-current ownership marker unexpectedly succeeded'
 fi
-grep -Fx 'format=0.9.23' "$case_dir/var/db/xsoc/account-ownership" >/dev/null ||
-  fail 'failed replacement did not preserve the legacy ownership marker'
-reset_fault_counters "$case_dir"
-run_postinstall "$case_dir" >"$case_dir/legacy-marker-upgrade.log" 2>&1 ||
-  fail 'legacy package-version ownership marker blocked replacement'
-grep -Fx 'marker_format=1' "$case_dir/var/db/xsoc/account-ownership" >/dev/null ||
-  fail 'legacy ownership marker was not overwritten with marker schema 1'
-grep -Fx 'last_package_version=@XSOC_PACKAGE_VERSION@' \
-  "$case_dir/var/db/xsoc/account-ownership" >/dev/null ||
-  fail 'rewritten ownership marker did not record the installed package version'
-grep -Fx 'state_format=1.0.0' "$case_dir/var/db/xsoc/account-ownership" >/dev/null ||
-  fail 'rewritten ownership marker did not separate the persistent-state format'
-if grep -E '^format=' "$case_dir/var/db/xsoc/account-ownership" >/dev/null; then
-  fail 'rewritten ownership marker retained the ambiguous legacy format field'
-fi
+cmp "$case_dir/marker.before" "$case_dir/var/db/xsoc/account-ownership" ||
+  fail 'rejected ownership marker was modified'
+cmp "$case_dir/config.before" "$case_dir/Library/Application Support/xsoc/config.json" ||
+  fail 'rejected ownership marker changed retained state'
+[ ! -s "$case_dir/launch/calls" ] && [ ! -e "$case_dir/chown-calls" ] &&
+  [ ! -e "$case_dir/pkill-calls" ] && [ ! -e "$case_dir/dscl/create-count" ] ||
+  fail 'non-current ownership marker reached service or account mutation'
+[ -d "$case_dir/dscl/Users/_xsoc" ] && [ -d "$case_dir/dscl/Groups/_xsoc" ] &&
+  [ -e "$case_dir/launch/loaded.org.sarmg.xsoc" ] ||
+  fail 'non-current ownership marker lost the existing account or service'
+write_valid_ownership_marker "$case_dir"
 
 # Current-schema markers from the 0.10 releases must also allow replacement.
 for prior_package_version in 0.10.1 0.10.2; do
@@ -1360,8 +1363,8 @@ write_ownership_marker_ids "$case_dir" 450 450 450 0.10.bad
 if run_postinstall "$case_dir" >"$case_dir/failure.log" 2>&1; then
   fail 'ownership marker with malformed package version unexpectedly succeeded'
 fi
-grep -F 'Invalid legacy ownership marker package version' "$case_dir/failure.log" >/dev/null ||
-  fail 'invalid legacy marker package version was not diagnosed'
+grep -F 'Invalid ownership marker package version' "$case_dir/failure.log" >/dev/null ||
+  fail 'invalid marker package version was not diagnosed'
 
 for unsafe_marker_case in uid-zero uid-above-range gid-zero gid-above-range; do
   case_dir="$test_root/unsafe-marker-$unsafe_marker_case"
